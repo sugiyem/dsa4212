@@ -2,6 +2,7 @@ import jax
 import jax.numpy as jnp
 from jax.typing import ArrayLike
 from jax import Array
+from typing import Callable
 
 RANDOM_SEED = 42
 
@@ -82,7 +83,6 @@ class PeepholeLSTM(LSTM):
         self.wi = rng_unif(key=self.key, shape=(hidden_dim, 2 * hidden_dim + input_dim))
         self.wo = rng_unif(key=self.key, shape=(hidden_dim, 2 * hidden_dim + input_dim))
     
-    
     def f_cur(self, x_cur: ArrayLike, h_prev: ArrayLike, c_prev: ArrayLike) -> ArrayLike:
         @jax.jit
         def f_cur_jit(x_cur: ArrayLike, h_prev: ArrayLike, c_prev: ArrayLike) -> ArrayLike:
@@ -115,17 +115,21 @@ class PeepholeLSTM(LSTM):
             return (c_t, self.h_cur(x_cur, h_prev, c_prev, c_t))
         return forward_jit(x_cur, h_prev, c_prev)
 
+    def backward(self, f: Callable, h_cur: ArrayLike, y_cur: ArrayLike) -> float:
+        cur_err = f(h_cur, y_cur)
+        pass
+
 class LSTMModel:
     def __init__(
         self,
-        num_layers: int,
+        num_lstm: int,
         lstm_type: str,
         input_dim: int,
         output_dim: int,
         hidden_dim: int,
         seed: int = RANDOM_SEED
     ):
-        self.num_layers = num_layers
+        self.num_lstm = num_lstm
         self.layers = []
         self.seed = seed
         self.input_dim = input_dim
@@ -136,18 +140,15 @@ class LSTMModel:
                 seed=self.seed, 
                 input_dim=self.input_dim, 
                 hidden_dim=self.hidden_dim) 
-                for _ in range(self.num_layers)]
+                for _ in range(self.num_lstm)]
         elif (lstm_type == "peephole"):
             self.layers = [PeepholeLSTM(
                 seed=self.seed,
                 input_dim=self.input_dim, 
                 hidden_dim=self.hidden_dim)
-                for _ in range(self.num_layers)]
+                for _ in range(self.num_lstm)]
         else:
             raise ValueError("lstm_type must be 'vanilla' or 'peephole'.")
         self.key = jax.random.PRNGKey(seed=self.seed)
         self.w_out = rng_unif(key=self.key, shape=(self.hidden_dim, self.output_dim))
-        self.b_out = rng_unif(key=self.key, shape=(self.hidden_dim,))
-    
-    def forward(self, x: ArrayLike) -> ArrayLike:
-        pass
+        self.b_out = rng_unif(key=self.key, shape=(self.output_dim,))
