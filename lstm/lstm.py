@@ -14,19 +14,21 @@ def rng_unif(key: Array, shape: tuple[int, int]) -> ArrayLike:
 class LSTM:
     def __init__(self, seed: int, input_dim: int, hidden_dim: int):
         self.key = jax.random.PRNGKey(seed)
-        self.wf = rng_unif(key=self.key, shape=(hidden_dim, input_dim))
+        self.wf = rng_unif(key=self.key, shape=(hidden_dim, hidden_dim + input_dim))
         self.bf = rng_unif(key=self.key, shape=(hidden_dim,))
-        self.wi = rng_unif(key=self.key, shape=(hidden_dim, input_dim))
+        self.wi = rng_unif(key=self.key, shape=(hidden_dim, hidden_dim + input_dim))
         self.bi = rng_unif(key=self.key, shape=(hidden_dim,))
-        self.wc = rng_unif(key=self.key, shape=(hidden_dim, input_dim))
+        self.wc = rng_unif(key=self.key, shape=(hidden_dim, hidden_dim + input_dim))
         self.bc = rng_unif(key=self.key, shape=(hidden_dim,))
+        self.wo = rng_unif(key=self.key, shape=(hidden_dim, hidden_dim + input_dim))
+        self.bo = rng_unif(key=self.key, shape=(hidden_dim,))
 
     def f_cur(self, x_cur: ArrayLike, h_prev: ArrayLike) -> ArrayLike:
-        return sigmoid((self.wf @ jnp.concatenate([h_prev, x_cur], axis=1).T) + self.bf)
+        return sigmoid((self.wf @ jnp.concatenate([h_prev, x_cur], axis=0)) + self.bf)
 
     def i_cur(self, x_cur: ArrayLike, h_prev: ArrayLike) -> tuple[ArrayLike, ArrayLike]:
-        i_t = sigmoid((self.wi @ jnp.concatenate([h_prev, x_cur], axis=1).T) + self.bi)
-        c_t_hat = jnp.tanh((self.wc @ jnp.concatenate([h_prev, x_cur], axis=1).T) + self.bc)
+        i_t = sigmoid((self.wi @ jnp.concatenate([h_prev, x_cur], axis=0)) + self.bi)
+        c_t_hat = jnp.tanh((self.wc @ jnp.concatenate([h_prev, x_cur], axis=0)) + self.bc)
         return i_t, c_t_hat
 
     def c_cur(self, x_cur: ArrayLike, h_prev: ArrayLike, c_prev: ArrayLike) -> ArrayLike:
@@ -34,4 +36,33 @@ class LSTM:
         return jnp.dot(self.f_cur(x_cur, h_prev), c_prev) + jnp.dot(i_t, c_t_hat)
     
     def o_cur(self, x_cur: ArrayLike, h_prev: ArrayLike) -> ArrayLike:
-        pass
+        return sigmoid((self.wo @ jnp.concatenate([h_prev, x_cur], axis=0)) + self.bo)
+    
+    def h_cur(self, x_cur: ArrayLike, h_prev: ArrayLike, c_prev: ArrayLike) -> ArrayLike:
+        return jnp.dot(self.o_cur(x_cur, h_prev), jnp.tanh(self.c_cur(x_cur, h_prev, c_prev)))
+    
+    def forward(self, x_cur: ArrayLike, h_prev: ArrayLike, c_prev: ArrayLike) -> tuple[ArrayLike, ArrayLike]:
+        return (self.c_cur(x_cur, h_prev, c_prev), self.h_cur(x_cur, h_prev, c_prev))
+
+class PeepholeLSTM(LSTM):
+    def __init__(self, seed: int, input_dim: int, hidden_dim: int):
+        super().__init__(seed, input_dim, hidden_dim)
+        self.wf = rng_unif(key=self.key, shape=(hidden_dim, 2 * hidden_dim + input_dim))
+        self.wi = rng_unif(key=self.key, shape=(hidden_dim, 2 * hidden_dim + input_dim))
+        self.wo = rng_unif(key=self.key, shape=(hidden_dim, 2 * hidden_dim + input_dim))
+    
+    def f_cur(self, x_cur: ArrayLike, h_prev: ArrayLike, c_prev: ArrayLike) -> ArrayLike:
+        return sigmoid(self.wf @ jnp.concatenate([c_prev, h_prev, x_cur], axis=0) + self.bf)
+
+    def i_cur(self, x_cur: ArrayLike, h_prev: ArrayLike, c_prev: ArrayLike) -> ArrayLike:
+        return sigmoid(self.wi @ jnp.concatenate([c_prev, h_prev, x_cur], axis=0) + self.bi)
+    
+    def o_cur(self, x_cur: ArrayLike, h_prev: ArrayLike, c_cur: ArrayLike) -> ArrayLike:
+        return sigmoid(self.wo @ jnp.concatenate([c_cur, h_prev, x_cur], axis=0) + self.bo)
+
+    def h_cur(self, x_cur: ArrayLike, h_prev: ArrayLike, c_prev: ArrayLike, c_t: ArrayLike) -> ArrayLike:
+        return jnp.dot(self.o_cur(x_cur, h_prev, c_t), jnp.tanh(self.c_cur(x_cur, h_prev, c_prev))) 
+
+    def forward(self, x_cur: ArrayLike, h_prev: ArrayLike, c_prev: ArrayLike) -> tuple[ArrayLike, ArrayLike]:
+        c_t = self.c_cur(x_cur, h_prev, c_prev)
+        return (c_t, self.h_cur(x_cur, h_prev, c_prev, c_t))
