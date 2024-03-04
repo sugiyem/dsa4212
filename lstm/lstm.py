@@ -1,14 +1,16 @@
 import jax
 import jax.numpy as jnp
 from typing import Callable
-from utils import RANDOM_SEED, rng_unif, sigmoid, LSTMParams
+from utils import RANDOM_SEED, rng_unif, sigmoid, LSTMParams, \
+    LSTMModelParams
 
 class LSTM:
     @staticmethod
-    def initialise_params(
+    def init_params(
         seed: int,
         input_dim: int,
-        hidden_dim: int
+        hidden_dim: int,
+        output_dim: int
     ) -> LSTMParams:
         key = jax.random.PRNGKey(seed)
         wf = rng_unif(key=key, shape=(hidden_dim, hidden_dim + input_dim))
@@ -19,7 +21,8 @@ class LSTM:
         bc = rng_unif(key=key, shape=(hidden_dim,))
         wo = rng_unif(key=key, shape=(hidden_dim, hidden_dim + input_dim))
         bo = rng_unif(key=key, shape=(hidden_dim,))
-        return LSTMParams(key, input_dim, hidden_dim, wf, bf, wi, bi, wc, bc, wo, bo)
+        wout = rng_unif(key=key, shape=(output_dim, hidden_dim))
+        return LSTMParams(key, input_dim, hidden_dim, output_dim, wf, bf, wi, bi, wc, bc, wo, bo, wout)
 
     @staticmethod
     @jax.jit
@@ -35,9 +38,9 @@ class LSTM:
 
     @staticmethod
     @jax.jit
-    def c_cur(params: LSTMParams, x_cur: jnp.ndarray, h_prev: jnp.ndarray, c_prev: jnp.ndarray) -> jnp.ndarray:
-        i_t, c_t_hat = params.i_cur(x_cur, h_prev)
-        return jnp.dot(params.f_cur(x_cur, h_prev), c_prev) + jnp.dot(i_t, c_t_hat)
+    def c_cur(x_cur: jnp.ndarray, h_prev: jnp.ndarray, c_prev: jnp.ndarray) -> jnp.ndarray:
+        i_t, c_t_hat = LSTM.i_cur(x_cur, h_prev)
+        return jnp.dot(LSTM.f_cur(x_cur, h_prev), c_prev) + jnp.dot(i_t, c_t_hat)
         
     
     @staticmethod
@@ -47,36 +50,50 @@ class LSTM:
     
     @staticmethod
     @jax.jit
-    def h_cur(params: LSTMParams, x_cur: jnp.ndarray, h_prev: jnp.ndarray, c_prev: jnp.ndarray) -> jnp.ndarray:
-        return jnp.dot(params.o_cur(x_cur, h_prev), jnp.tanh(params.c_cur(x_cur, h_prev, c_prev)))
+    def h_cur(x_cur: jnp.ndarray, h_prev: jnp.ndarray, c_prev: jnp.ndarray) -> jnp.ndarray:
+        return jnp.dot(LSTM.o_cur(x_cur, h_prev), jnp.tanh(LSTM.c_cur(x_cur, h_prev, c_prev)))
         
     @staticmethod
     @jax.jit
-    def forward(params: LSTMParams, x_cur: jnp.ndarray, h_prev: jnp.ndarray, c_prev: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
-        return (params.c_cur(x_cur, h_prev, c_prev), params.h_cur(x_cur, h_prev, c_prev))
+    def forward(
+        x_cur: jnp.ndarray, 
+        h_prev: jnp.ndarray, 
+        c_prev: jnp.ndarray,
+        wout: jnp.ndarray
+    ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+        h_t = LSTM.h_cur(x_cur, h_prev, c_prev)
+        o_t = wout @ h_t
+        return (LSTM.c_cur(x_cur, h_prev, c_prev), o_t, h_t)
 
     @staticmethod
     @jax.jit
     def forward_full(params: LSTMParams, x_in: jnp.ndarray) -> jnp.ndarray:
         time_steps = x_in.shape[0]
-        h, c = jnp.zeros(shape=(params.hidden_dim,)), jnp.zeros(shape=(params.hidden_dim,))
-        h_ls = []
+        h, o, c = jnp.zeros(shape=(params.hidden_dim,)), jnp.zeros(shape=(params.output_dim,)), jnp.zeros(shape=(params.hidden_dim,))
+        o_ls = []
         for i in range(len(time_steps)):
-            c_t, h_t = params.forward(x_in[i,:], h, c)
-            h_ls.append(h_t)
-            h, c = h_t, c_t
-        return jnp.array(h_ls)
-    
+            c_t, o_t, h_t = LSTM.forward(x_in[i,:], h, c)
+            o_ls.append(o_t)
+            h, o, c = h_t, o_t, c_t
+
+        return jnp.array(o_ls)
+
     @staticmethod
     @jax.jit
-    def backward_full(params: LSTMParams, h_out: jnp.ndarray, y_true: jnp.ndarray) -> jnp.ndarray:
-        pass
+    def backward_full(
+        params: LSTMParams, 
+        f: Callable[[jnp.ndarray, jnp.ndarray, jnp.ndarray], jnp.ndarray], 
+        o_out: jnp.ndarray, 
+        y_true: jnp.ndarray
+    ) -> tuple[jnp.ndarray, jnp.ndarray]:
+        assert o_out.shape == y_true.shape, "h_out and y_true must have the same shape"
+        f_batch = jax.jit(jax.vmap(f, in_axes=(0,)))
+        loss = f_batch(params, o_out, y_true)
+        f_batch_grad = jax.jit(jax.grad(f_batch))
+        loss_grad = f_batch_grad(params, o_out, y_true)
+        return loss, loss_grad
             
-
-
-
 class PeepholeLSTM(LSTM):
-    
     @staticmethod
     @jax.jit
     def f_cur(params: LSTMParams, x_cur: jnp.ndarray, h_prev: jnp.ndarray, c_prev: jnp.ndarray) -> jnp.ndarray:
@@ -94,51 +111,82 @@ class PeepholeLSTM(LSTM):
 
     @staticmethod
     @jax.jit
-    def h_cur(params: LSTMParams, x_cur: jnp.ndarray, h_prev: jnp.ndarray, c_prev: jnp.ndarray, c_t: jnp.ndarray) -> jnp.ndarray:
-        return jnp.dot(params.o_cur(x_cur, h_prev, c_t), jnp.tanh(params.c_cur(x_cur, h_prev, c_prev))) 
+    def h_cur(x_cur: jnp.ndarray, h_prev: jnp.ndarray, c_prev: jnp.ndarray, c_t: jnp.ndarray) -> jnp.ndarray:
+        return jnp.dot(PeepholeLSTM.o_cur(x_cur, h_prev, c_t), jnp.tanh(PeepholeLSTM.c_cur(x_cur, h_prev, c_prev))) 
 
     @staticmethod
     @jax.jit
-    def forward(params: LSTMParams, x_cur: jnp.ndarray, h_prev: jnp.ndarray, c_prev: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
-        c_t = params.c_cur(x_cur, h_prev, c_prev)
-        return (c_t, params.h_cur(x_cur, h_prev, c_prev, c_t))
+    def forward(
+        x_cur: jnp.ndarray, 
+        h_prev: jnp.ndarray, 
+        c_prev: jnp.ndarray,
+        wout: jnp.ndarray
+    ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+        c_t = PeepholeLSTM.c_cur(x_cur, h_prev, c_prev)
+        h_t = PeepholeLSTM.h_cur(x_cur, h_prev, c_prev, c_t)
+        o_t = wout @ h_t
+        return (c_t, o_t, h_t)
 
     @staticmethod
     @jax.jit
-    def backward(params, f: Callable, h_cur: jnp.ndarray, y_cur: jnp.ndarray) -> float:
-        cur_err = f(h_cur, y_cur)
-        pass
+    def forward_full(params: LSTMParams, x_in: jnp.ndarray) -> jnp.ndarray:
+        time_steps = x_in.shape[0]
+        h, o, c = jnp.zeros(shape=(params.hidden_dim,)), jnp.zeros(shape=(params.output_dim,)), jnp.zeros(shape=(params.hidden_dim,))
+        o_ls = []
+        for i in range(len(time_steps)):
+            c_t, o_t, h_t = PeepholeLSTM.forward(x_in[i,:], h, c)
+            o_ls.append(o_t)
+            h, o, c = h_t, o_t, c_t
+        return jnp.array(o_ls)
+
+    @staticmethod
+    @jax.jit
+    def backward_full(
+        params: LSTMParams, 
+        f: Callable[[jnp.ndarray, jnp.ndarray, jnp.ndarray], jnp.ndarray], 
+        o_out: jnp.ndarray, 
+        y_true: jnp.ndarray
+    ) -> tuple[jnp.ndarray, jnp.ndarray]:
+        assert o_out.shape == y_true.shape, "h_out and y_true must have the same shape"
+        f_batch = jax.jit(jax.vmap(f, in_axes=(0,)))
+        loss = f_batch(params, o_out, y_true)
+        f_batch_grad = jax.jit(jax.grad(f_batch))
+        loss_grad = f_batch_grad(params, o_out, y_true)
+        return loss, loss_grad
 
 class LSTMModel:
-    def __init__(
-        params,
+    def init_params(
+        input_dim: int,
+        hidden_dim: int,
+        output_dim: int,
         num_lstm: int,
         lstm_type: str,
-        input_dim: int,
-        output_dim: int,
-        hidden_dim: int,
         seed: int = RANDOM_SEED
     ):
-        params.num_lstm = num_lstm
-        params.layers = []
-        params.seed = seed
-        params.input_dim = input_dim
-        params.output_dim = output_dim
-        params.hidden_dim = hidden_dim
+        assert num_lstm >= 1, "num_lstm must be >= 1"
         if (lstm_type == "vanilla"):
-            params.layers = [LSTM(
-                seed=params.seed, 
-                input_dim=params.input_dim, 
-                hidden_dim=params.hidden_dim) 
-                for _ in range(params.num_lstm)]
+            layers = [LSTM.init_params(
+                seed=seed, 
+                input_dim=input_dim, 
+                hidden_dim=hidden_dim,
+                output_dim=output_dim
+            ) 
+                for _ in range(num_lstm)]
         elif (lstm_type == "peephole"):
-            params.layers = [PeepholeLSTM(
-                seed=params.seed,
-                input_dim=params.input_dim, 
-                hidden_dim=params.hidden_dim)
-                for _ in range(params.num_lstm)]
+            layers = [PeepholeLSTM.init_params(
+                seed=seed,
+                input_dim=input_dim, 
+                hidden_dim=hidden_dim,
+                output_dim=output_dim
+            )
+                for _ in range(num_lstm)]
         else:
             raise ValueError("lstm_type must be 'vanilla' or 'peephole'.")
-        params.key = jax.random.PRNGKey(seed=params.seed)
-        params.w_out = rng_unif(key=params.key, shape=(params.hidden_dim, params.output_dim))
-        params.b_out = rng_unif(key=params.key, shape=(params.output_dim,))
+        return LSTMModelParams(num_lstm, lstm_type, layers)
+
+    def forward(params: LSTMModelParams, x_in: jnp.ndarray):
+        num_lstm = params.num_lstm
+
+        for i in range(num_lstm):
+            cur_params = params.layers[i]
+            x_in = type(params.layers[0]).forward_full(cur_params, x_in)

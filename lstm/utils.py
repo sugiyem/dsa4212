@@ -16,6 +16,7 @@ class LSTMParams(NamedTuple):
     key: Array
     input_dim: int
     hidden_dim: int
+    output_dim: int
     wf: jnp.ndarray
     bf: jnp.ndarray
     wi: jnp.ndarray
@@ -24,3 +25,9 @@ class LSTMParams(NamedTuple):
     bc: jnp.ndarray
     wo: jnp.ndarray
     bo: jnp.ndarray
+    wout: jnp.ndarray
+
+class LSTMModelParams(NamedTuple):
+    num_lstm: int
+    lstm_type: str
+    layers: list[LSTMParams]
