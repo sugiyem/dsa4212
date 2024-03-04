@@ -192,4 +192,15 @@ class LSTMModel:
             o_out = type(params.layers[0]).forward_full(cur_params, x_in)
         return o_out
         
-        
+    def backward(
+        params: LSTMModelParams, 
+        f: Callable[[jnp.ndarray, jnp.ndarray, jnp.ndarray], jnp.ndarray], 
+        o_out: jnp.ndarray, 
+        y_true: jnp.ndarray
+    ) -> tuple[jnp.ndarray, jnp.ndarray]:
+        assert o_out.shape == y_true.shape, "h_out and y_true must have the same shape"
+        f_batch = jax.jit(jax.vmap(f, in_axes=(0,)))
+        loss = f_batch(params, o_out, y_true)
+        f_batch_grad = jax.jit(jax.grad(f_batch))
+        loss_grad = f_batch_grad(params, o_out, y_true)
+        return loss, loss_grad 
