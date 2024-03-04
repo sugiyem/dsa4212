@@ -72,7 +72,7 @@ class LSTM:
         h, o, c = jnp.zeros(shape=(params.hidden_dim,)), jnp.zeros(shape=(params.output_dim,)), jnp.zeros(shape=(params.hidden_dim,))
         o_ls = []
         for i in range(len(time_steps)):
-            c_t, o_t, h_t = LSTM.forward(x_in[i,:], h, c)
+            c_t, o_t, h_t = LSTM.forward(x_in[i,:], h, c, params.wout)
             o_ls.append(o_t)
             h, o, c = h_t, o_t, c_t
 
@@ -134,7 +134,7 @@ class PeepholeLSTM(LSTM):
         h, o, c = jnp.zeros(shape=(params.hidden_dim,)), jnp.zeros(shape=(params.output_dim,)), jnp.zeros(shape=(params.hidden_dim,))
         o_ls = []
         for i in range(len(time_steps)):
-            c_t, o_t, h_t = PeepholeLSTM.forward(x_in[i,:], h, c)
+            c_t, o_t, h_t = PeepholeLSTM.forward(x_in[i,:], h, c, params.wout)
             o_ls.append(o_t)
             h, o, c = h_t, o_t, c_t
         return jnp.array(o_ls)
@@ -184,9 +184,12 @@ class LSTMModel:
             raise ValueError("lstm_type must be 'vanilla' or 'peephole'.")
         return LSTMModelParams(num_lstm, lstm_type, layers)
 
-    def forward(params: LSTMModelParams, x_in: jnp.ndarray):
+    def forward(params: LSTMModelParams, x_in: jnp.ndarray) -> jnp.ndarray:
         num_lstm = params.num_lstm
-
+        o_out = jnp.zeros(shape=(x_in.shape[0], params.layers[0].output_dim))
         for i in range(num_lstm):
             cur_params = params.layers[i]
-            x_in = type(params.layers[0]).forward_full(cur_params, x_in)
+            o_out = type(params.layers[0]).forward_full(cur_params, x_in)
+        return o_out
+        
+        
