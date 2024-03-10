@@ -17,6 +17,10 @@ class MultiHeadAttnParams(NamedTuple):
     wo: jnp.ndarray
 
 @jax.jit
+def rng_unif(key: jax.Array, shape) -> jnp.ndarray:
+    return jax.random.uniform(key=key, shape=shape)
+
+@jax.jit
 def softmax(x: jnp.ndarray) -> jnp.ndarray:
     x_exp = jnp.exp(x)
     return x_exp / jnp.sum(x_exp)
