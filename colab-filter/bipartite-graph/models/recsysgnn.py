@@ -8,8 +8,8 @@
 
 import torch
 import torch.nn as nn
-import NGCFConv from ngcf
-import LightGCNConv from lightgcn
+from ngcf import NGCFConv
+from lightgcn import LightGCNConv
 
 class RecSysGNN(nn.Module):
   def __init__(
