@@ -1,7 +1,10 @@
-# Credit: 
+########################################################################################################################
+# CREDIT
 
 # Code Link: https://colab.research.google.com/drive/1VQTBxJuty7aLMepjEYE-d7E9kjo51CA1?usp=sharing#scrollTo=Y9fonQcxt3do
+
 # Authors: Derrick Li, Peter Maldonado, Akram Sbaih [Stanford, CS224W]
+########################################################################################################################
 
 import torch_geometric
 from torch_geometric.nn.conv import MessagePassing
