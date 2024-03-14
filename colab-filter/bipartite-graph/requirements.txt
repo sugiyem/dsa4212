@@ -7,3 +7,4 @@ tqdm
 pandas
 numpy
 scikit-learn
+pyspark==3.5.1
