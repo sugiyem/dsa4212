@@ -1,6 +1,6 @@
 import jax
 import jax.numpy as jnp
-from utils import InputParams, MultiHeadAttnParams, softmax, rng_unif, relu
+from utils import InputParams, MultiHeadAttnParams, softmax, rng_unif, relu, basic_normalize
 
 class Attention:
     @jax.jit 
@@ -97,8 +97,16 @@ class SingleEncoder:
         self.network = FeedForwardNetwork(key, input_dim, hidden_dim)
         
     def encode(self, x: jnp.ndarray, mask: jnp.ndarray = None) -> jnp.ndarray:
-        y = self.attention.calc_multi_head_attention(x, x, x, mask)
-        y = self.network.forward(y)
+        # Use the multi head attention
+        att_val = self.attention.calc_multi_head_attention(x, x, x, mask)
+        # Add + normalizate
+        att_val = basic_normalize(x + att_val)
+
+        # Use the feed forward NN
+        y = self.network.forward(att_val)
+        # Add + normalize
+        y = basic_normalize(att_val + y)
+
         return y
     
 class Encoder:
@@ -121,7 +129,7 @@ class Encoder:
         return y
 
 # Single decoder will have two multi-head attentions and one feed forward NN
-class SingleDecoder():
+class SingleDecoder:
     def __init__(
         self,
         key: jax.Array,
@@ -141,9 +149,21 @@ class SingleDecoder():
         mask1: jnp.ndarray = None,
         mask2: jnp.ndarray = None
     ) -> jnp.ndarray:
-        y = self.first_attention.calc_multi_head_attention(x, x, x, mask1)
-        y = self.second_attention.calc_multi_head_attention(x, encoding_mem, encoding_mem, mask2)
+        # Use the first multi-head attention
+        att_val1 = self.first_attention.calc_multi_head_attention(x, x, x, mask1)
+        # Add + normalize
+        att_val1 = basic_normalize(x + att_val1)
+
+        # Use the second multi-head attention
+        att_val2 = self.second_attention.calc_multi_head_attention(att_val1, encoding_mem, encoding_mem, mask2)
+        # Add + normalize
+        att_val2 = basic_normalize(att_val1 + att_val2)
+
+        # Use the feed forward NN
         y = self.network.forward(y)
+        # Add + normalize
+        y = basic_normalize(att_val2 + y)
+
         return y
 
 class Decoder:

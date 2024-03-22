@@ -35,3 +35,7 @@ def calc_inputs(params: InputParams, x: jnp.ndarray) -> jnp.ndarray:
 @jax.jit 
 def relu(x: jnp.ndarray) -> jnp.ndarray:
     return jnp.maximum(x, 0)
+
+@jax.jit
+def basic_normalize(x: jnp.ndarray) -> jnp.ndarray:
+    return (x - jnp.mean(x)) / (jnp.std(x) + 1e-6)
