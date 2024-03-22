@@ -20,7 +20,7 @@ class Attention():
         self.wq = rng_unif(key=key, shape=(num_attention_layers, input_dim, dk))
         self.wk = rng_unif(key=key, shape=(num_attention_layers, input_dim, dk))
         self.wv = rng_unif(key=key, shape=(num_attention_layers, input_dim, dv))
-        self.wo = rng_unif(key=key, shape=(dv, input_dim)) # output_dim = input_dim
+        self.wo = rng_unif(key=key, shape=(num_attention_layers * dv, input_dim)) # output_dim = input_dim
 
     @staticmethod
     @jax.jit
@@ -82,4 +82,22 @@ class FeedForwardNetwork():
         y = y @ self.layer2_matrix 
         return y
 
-
+# Single encoder will have one multi-head attention and one feed forward NN
+class SingleEncoder:
+    def __init__(
+        self, 
+        key: jax.Array,
+        input_dim: int,
+        hidden_dim: int,
+        num_attention_layers: int,
+        dk: int,
+        dv: int
+    ):
+        self.attention = Attention(key, input_dim, num_attention_layers, dk, dv)
+        self.network = FeedForwardNetwork(key, input_dim, hidden_dim)
+        
+    def forward(self, x: jnp.ndarray, mask: jnp.ndarray = None) -> jnp.ndarray:
+        "Pass the input (and mask) through each layer in turn."
+        y = self.attention.calc_multi_head_attention(x, x, x, mask)
+        y = self.network.forward(y)
+        return y
