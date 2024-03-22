@@ -96,7 +96,7 @@ class SingleEncoder:
         self.attention = Attention(key, input_dim, num_attention_layers, dk, dv)
         self.network = FeedForwardNetwork(key, input_dim, hidden_dim)
         
-    def forward(self, x: jnp.ndarray, mask: jnp.ndarray = None) -> jnp.ndarray:
+    def encode(self, x: jnp.ndarray, mask: jnp.ndarray = None) -> jnp.ndarray:
         y = self.attention.calc_multi_head_attention(x, x, x, mask)
         y = self.network.forward(y)
         return y
@@ -114,10 +114,10 @@ class Encoder:
     ):
         self.layers = [SingleEncoder(key, input_dim, hidden_dim, num_attention_layers, dk, dv) for _ in range(num_encoder)]
 
-    def forward(self, x: jnp.ndarray, mask: jnp.ndarray = None) -> jnp.ndarray:
+    def encode(self, x: jnp.ndarray, mask: jnp.ndarray = None) -> jnp.ndarray:
         y = x
         for layer in self.layers:
-            y = layer.forward(y, mask)
+            y = layer.encode(y, mask)
         return y
 
 # Single decoder will have two multi-head attentions and one feed forward NN
@@ -135,7 +135,7 @@ class SingleDecoder():
         self.second_attention = Attention(key, input_dim, num_attention_layers, dk, dv)
         self.network = FeedForwardNetwork(key, input_dim, hidden_dim)
 
-    def forward(self,
+    def decode(self,
         x: jnp.ndarray,
         encoding_mem: jnp.ndarray, # memory during encoding process
         mask1: jnp.ndarray = None,
@@ -159,7 +159,7 @@ class Decoder:
     ):
         self.layers = [SingleDecoder(key, input_dim, hidden_dim, num_attention_layers, dk, dv) for _ in range(num_decoder)]
 
-    def forward(self, 
+    def decode(self, 
         x: jnp.ndarray, 
         encoding_mem: jnp.ndarray,
         mask1: jnp.ndarray = None,
@@ -167,5 +167,29 @@ class Decoder:
     ) -> jnp.ndarray:
         y = x
         for layer in self.layers:
-            y = layer.forward(y, encoding_mem, mask1, mask2)
+            y = layer.decode(y, encoding_mem, mask1, mask2)
         return y
+    
+class Transformer:
+    def __init__(
+        self,
+        key: jax.Array,
+        input_dim: int,
+        hidden_dim: int,
+        num_attention_layers: int,
+        dk: int,
+        dv: int,
+        num_encoder: int,
+        num_decoder: int
+    ):
+        self.encoder = Encoder(key, input_dim, hidden_dim, num_attention_layers, dk, dv, num_encoder)
+        self.decoder = Decoder(key, input_dim, hidden_dim, num_attention_layers, dk, dv, num_decoder)
+
+    def forward(self,
+        input: jnp.ndarray,
+        output: jnp.ndarray,
+        input_mask: jnp.ndarray = None,
+        output_mask: jnp.ndarray = None
+    ) -> jnp.ndarray:
+        encoding_mem = self.encoder.forward(input, input_mask)
+        return self.decoder.decode(output, encoding_mem, input_mask, output_mask)
