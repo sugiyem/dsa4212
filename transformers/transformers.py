@@ -119,3 +119,53 @@ class Encoder:
         for layer in self.layers:
             y = layer.forward(y, mask)
         return y
+
+# Single decoder will have two multi-head attentions and one feed forward NN
+class SingleDecoder():
+    def __init__(
+        self,
+        key: jax.Array,
+        input_dim: int,
+        hidden_dim: int,
+        num_attention_layers: int,
+        dk: int,
+        dv: int
+    ):
+        self.first_attention = Attention(key, input_dim, num_attention_layers, dk, dv)
+        self.second_attention = Attention(key, input_dim, num_attention_layers, dk, dv)
+        self.network = FeedForwardNetwork(key, input_dim, hidden_dim)
+
+    def forward(self,
+        x: jnp.ndarray,
+        encoding_mem: jnp.ndarray, # memory during encoding process
+        mask1: jnp.ndarray = None,
+        mask2: jnp.ndarray = None
+    ) -> jnp.ndarray:
+        y = self.first_attention.calc_multi_head_attention(x, x, x, mask1)
+        y = self.second_attention.calc_multi_head_attention(x, encoding_mem, encoding_mem, mask2)
+        y = self.network.forward(y)
+        return y
+
+class Decoder:
+    def __init__(
+        self,
+        key: jax.Array,
+        input_dim: int,
+        hidden_dim: int,
+        num_attention_layers: int,
+        dk: int,
+        dv: int,
+        num_decoder: int
+    ):
+        self.layers = [SingleDecoder(key, input_dim, hidden_dim, num_attention_layers, dk, dv) for _ in range(num_decoder)]
+
+    def forward(self, 
+        x: jnp.ndarray, 
+        encoding_mem: jnp.ndarray,
+        mask1: jnp.ndarray = None,
+        mask2: jnp.ndarray = None
+    ) -> jnp.ndarray:
+        y = x
+        for layer in self.layers:
+            y = layer.forward(y, encoding_mem, mask1, mask2)
+        return y
