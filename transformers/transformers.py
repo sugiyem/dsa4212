@@ -1,20 +1,26 @@
 import jax
 import jax.numpy as jnp
-from utils import InputParams, MultiHeadAttnParams, softmax, rng_unif
+from utils import InputParams, MultiHeadAttnParams, softmax, rng_unif, relu
 
-class Attention:
-    @staticmethod
-    @jax.jit
-    def init_input_params(
-        key: jax.Array,
+class Attention():
+    @jax.jit 
+    def __init__(
+        self, 
+        key: jax.Array, 
         input_dim: int,
-        dk: int, 
+        num_attention_layers: int,
+        dk: int,
         dv: int
-    ) -> InputParams:
-        wq = rng_unif(key=key, shape=(input_dim, dk))
-        wk = rng_unif(key=key, shape=(input_dim, dk))
-        wv = rng_unif(key=key, shape=(input_dim, dv))
-        return InputParams(wq, wk, wv)
+    ):
+        self.key = key 
+        self.input_dim = input_dim
+        self.num_attention_layers = num_attention_layers
+        self.dk = dk
+        self.dv = dv
+        self.wq = rng_unif(key=key, shape=(num_attention_layers, input_dim, dk))
+        self.wk = rng_unif(key=key, shape=(num_attention_layers, input_dim, dk))
+        self.wv = rng_unif(key=key, shape=(num_attention_layers, input_dim, dv))
+        self.wo = rng_unif(key=key, shape=(dv, input_dim)) # output_dim = input_dim
 
     @staticmethod
     @jax.jit
@@ -26,7 +32,6 @@ class Attention:
         dk = query.shape[0]
         return softmax((query @ key.T)/jnp.sqrt(dk)) @ value
 
-    @staticmethod
     @jax.jit
     def calc_masked_attention(
         query: jnp.ndarray,
@@ -39,10 +44,9 @@ class Attention:
         masked_scores = jnp.where(mask == 0, -jnp.inf, scores)
         return softmax(masked_scores) @ value
     
-    @staticmethod
     @jax.jit
     def calc_multi_head_attention(
-        params: MultiHeadAttnParams,
+        self,
         query: jnp.ndarray,
         key: jnp.ndarray,
         value: jnp.ndarray,
@@ -50,15 +54,32 @@ class Attention:
     ) -> jnp.ndarray:
         concat_attention = jnp.array([])
 
-        for attention_param in params.w_full:
-            wq_i, wk_i, wv_i = attention_param
-            q_i = query @ wq_i 
-            k_i = key @ wk_i 
-            v_i = value @ wv_i
+        for i in range(self.num_attention_layers):
+            q_i = query @ self.wq[i]
+            k_i = key @ self.wk[i]
+            v_i = value @ self.wv[i]
 
-            scaled_attention = Attention.calc_attention(q_i, k_i, v_i) if mask is None \
+            scaled_attention = self.calc_attention(q_i, k_i, v_i) if mask is None \
                 else Attention.calc_masked_attention(q_i, k_i, v_i, mask)
             concat_attention = jnp.append(concat_attention, scaled_attention)
         
-        return concat_attention @ params.wo
+        return concat_attention @ self.wo
+
+# MLP with 1 hidden layer and ReLU as it's activation function
+class FeedForwardNetwork():
+    def __init__(
+        self,
+        key: jax.Array,
+        input_dim: int,
+        hidden_dim: int 
+    ):
+        self.layer1_matrix = rng_unif(key=key, shape=(input_dim, hidden_dim))
+        self.layer2_matrix = rng_unif(key=key, shape=(hidden_dim, input_dim))
+
+    def forward(self, x: jnp.ndarray) -> jnp.ndarray:
+        y = x @ self.layer1_matrix
+        y = relu(y)
+        y = y @ self.layer2_matrix 
+        return y
+
 

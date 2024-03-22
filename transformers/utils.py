@@ -31,3 +31,7 @@ def calc_inputs(params: InputParams, x: jnp.ndarray) -> jnp.ndarray:
     k = x @ params.wk
     v = x @ params.wv
     return jnp.array([q, k, v])
+
+@jax.jit 
+def relu(x: jnp.ndarray) -> jnp.ndarray:
+    return jnp.maximum(x, 0)
