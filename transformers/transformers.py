@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 from utils import InputParams, MultiHeadAttnParams, softmax, rng_unif, relu
 
-class Attention():
+class Attention:
     @jax.jit 
     def __init__(
         self, 
@@ -66,7 +66,7 @@ class Attention():
         return concat_attention @ self.wo
 
 # MLP with 1 hidden layer and ReLU as it's activation function
-class FeedForwardNetwork():
+class FeedForwardNetwork:
     def __init__(
         self,
         key: jax.Array,
@@ -97,7 +97,25 @@ class SingleEncoder:
         self.network = FeedForwardNetwork(key, input_dim, hidden_dim)
         
     def forward(self, x: jnp.ndarray, mask: jnp.ndarray = None) -> jnp.ndarray:
-        "Pass the input (and mask) through each layer in turn."
         y = self.attention.calc_multi_head_attention(x, x, x, mask)
         y = self.network.forward(y)
+        return y
+    
+class Encoder:
+    def __init__(
+        self,
+        key: jax.Array,
+        input_dim: int,
+        hidden_dim: int,
+        num_attention_layers: int,
+        dk: int,
+        dv: int,
+        num_encoder: int
+    ):
+        self.layers = [SingleEncoder(key, input_dim, hidden_dim, num_attention_layers, dk, dv) for _ in range(num_encoder)]
+
+    def forward(self, x: jnp.ndarray, mask: jnp.ndarray = None) -> jnp.ndarray:
+        y = x
+        for layer in self.layers:
+            y = layer.forward(y, mask)
         return y
