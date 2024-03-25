@@ -1,8 +1,8 @@
-latent_dim = 64
-n_layers = 3 
+LATENT_DIM = 64
+N_LAYERS = 3
 
-EPOCHS = 50
+EPOCHS = 20
 BATCH_SIZE = 1024
 DECAY = 0.0001
-LR = 0.005 
-K = 20
+LR = 0.001 
+K = 5
