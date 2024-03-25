@@ -1,7 +1,7 @@
 # Exact versions will be specified in the future for reproducibility
 
-torch-scatter==1.10.0
-torch-sparse==1.10.0
+torch-scatter==2.1.2
+torch-sparse==0.6.18
 git+https://github.com/pyg-team/pytorch_geometric.git
 tqdm
 pandas

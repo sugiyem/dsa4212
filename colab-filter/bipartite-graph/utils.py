@@ -10,12 +10,13 @@ import random
 from tqdm.notebook import tqdm
 import torch
 import pandas as pd
+import numpy as np
 
 import parameters
 import metrics
 
 
-def train_and_eval(model, optimizer, train_df):
+def train_and_eval(model, optimizer, train_df, train_edge_index, n_users, n_items, test_df, K, device):
   loss_list_epoch = []
   bpr_loss_list_epoch = []
   reg_loss_list_epoch = []
@@ -24,7 +25,7 @@ def train_and_eval(model, optimizer, train_df):
   precision_list = []
 
   for epoch in tqdm(range(parameters.EPOCHS)):
-      n_batch = int(len(train)/parameters.BATCH_SIZE)
+      n_batch = int(len(train_df)/parameters.BATCH_SIZE)
     
       final_loss_list = []
       bpr_loss_list = []
@@ -35,7 +36,7 @@ def train_and_eval(model, optimizer, train_df):
 
           optimizer.zero_grad()
 
-          users, pos_items, neg_items = data_loader(train_df, parameters.BATCH_SIZE, n_users, n_items)
+          users, pos_items, neg_items = data_loader(train_df, parameters.BATCH_SIZE, n_users, n_items, device)
           users_emb, pos_emb, neg_emb, userEmb0,  posEmb0, negEmb0 = model.encode_minibatch(users, pos_items, neg_items, train_edge_index)
 
           bpr_loss, reg_loss = metrics.compute_bpr_loss(
@@ -56,7 +57,7 @@ def train_and_eval(model, optimizer, train_df):
           _, out = model(train_edge_index)
           final_user_Embed, final_item_Embed = torch.split(out, (n_users, n_items))
           test_topK_recall,  test_topK_precision = metrics.get_metrics(
-            final_user_Embed, final_item_Embed, n_users, n_items, train_df, test_df, K
+            final_user_Embed, final_item_Embed, n_users, n_items, train_df, test_df, K, device
           )
 
       loss_list_epoch.append(round(np.mean(final_loss_list),4))
@@ -75,7 +76,7 @@ def train_and_eval(model, optimizer, train_df):
   )
 
 
-def data_loader(data, batch_size, n_usr, n_itm):
+def data_loader(data, batch_size, n_usr, n_itm, device):
 
     def sample_neg(x):
         while True:

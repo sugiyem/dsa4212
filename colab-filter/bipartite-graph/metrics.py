@@ -27,8 +27,8 @@ def compute_bpr_loss(users, users_emb, pos_emb, neg_emb, user_emb0,  pos_emb0, n
       
   return bpr_loss, reg_loss
 
-def get_metrics(user_Embed_wts, item_Embed_wts, n_users, n_items, train_data, test_data, K):
-  test_user_ids = torch.LongTensor(test_data['user_id_idx'].unique())
+def get_metrics(user_Embed_wts, item_Embed_wts, n_users, n_items, train_df, test_df, K, device):
+
   # compute the score of all user-item pairs
   relevance_score = torch.matmul(user_Embed_wts, torch.transpose(item_Embed_wts,0, 1))
 
@@ -53,7 +53,7 @@ def get_metrics(user_Embed_wts, item_Embed_wts, n_users, n_items, train_data, te
 
   # measure overlap between recommended (top-scoring) and held-out user-item 
   # interactions
-  test_interacted_items = test_data.groupby('user_id_idx')['item_id_idx'].apply(list).reset_index()
+  test_interacted_items = test_df.groupby('user_id_idx')['item_id_idx'].apply(list).reset_index()
   metrics_df = pd.merge(test_interacted_items,topk_relevance_indices_df, how= 'left', left_on = 'user_id_idx',right_on = ['user_ID'])
   metrics_df['intrsctn_itm'] = [list(set(a).intersection(b)) for a, b in zip(metrics_df.item_id_idx, metrics_df.top_rlvnt_itm)]
 
