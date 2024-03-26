@@ -170,6 +170,7 @@ cython_debug/
 *.zip
 data/
 *.pt
+*.csv
 
 # bibtex
 *.bib
