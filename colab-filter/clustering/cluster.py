@@ -17,12 +17,12 @@ def l2_norm(x):
 class BasicClusteringRecommender:
     # n_neighbor will specify the number of most similar user to find
     # n_recommendation will specify the number of recommended songs to output
-    def __init__(self, n_neighbor, n_recommendation):
+    def __init__(self, n_neighbor, n_recommendation=10):
         self.n_neighbor = n_neighbor
         self.n_recommendation = n_recommendation
         self.similar_user_dict = {}
 
-    # data must be a pd.dataframe with 3 columns, userID songID rating
+    # data must be a pd.dataframe with at least 3 columns, userID songID and rating
     def fit(self, data):
         self.n_userID = data.userID.max() + 1
         self.n_songID = data.songID.max() + 1
@@ -40,7 +40,7 @@ class BasicClusteringRecommender:
         userSongs, userRatings = self.get_songs_and_ratings(userID)
         userNorm = l2_norm(userRatings)
         
-        userVector = np.zeros(self.n_userID)
+        userVector = np.zeros(self.n_songID)
         userVector[userSongs] = userRatings
 
         pq = []
@@ -78,9 +78,9 @@ class BasicClusteringRecommender:
 
         if sum == 0:
             # default rating if no similar user rates this song
-            return 0.
+            return 3
         else:
-            return sum / cnt
+            return round(sum / cnt)
     
     # given userID, find the recommendation for this user
     def predict(self, userID):
@@ -105,11 +105,12 @@ class BasicClusteringRecommender:
 # The idea is to use minibatch K-means clustering to split the user to a number of clusters
 # Then, each time we want to predict something, we'll find n most similar user in the same cluster
 class KMeansRecommender():
-    def __init__(self, n_neighbor, n_recommendation, n_cluster=10):
+    def __init__(self, n_neighbor, n_recommendation=10, n_cluster=10, use_minibatch=True):
         self.n_neighbor = n_neighbor
         self.n_recommendation = n_recommendation
         self.similar_user_dict = {}
         self.n_cluster = n_cluster
+        self.use_minibatch = use_minibatch
 
     def get_songs_and_ratings(self, userID):
         filtered_data = self.data[self.data.userID == userID]
@@ -123,17 +124,20 @@ class KMeansRecommender():
 
         # perform mini-batch k-means clustering
         n_iter = 10
-        n_samples = 10000
+        n_samples = self.n_userID // 5 # to be used in minibatch 
 
         # iteratively update the centroid
-        centroids = np.random.randint(1, 6, (self.n_cluster, self.n_songID))
+        centroids = np.random.randint(3, 6, (self.n_cluster, self.n_songID))
         for _ in range(n_iter):
-            random_indices = np.random.choice(self.n_userID, n_samples, replace=False)
+            indices = np.arange(self.n_userID)
+            if self.use_minibatch:
+                indices = np.random.choice(self.n_userID, n_samples, replace=True)
+            
             centroid_norms = [l2_norm(centroid - 3) for centroid in centroids]
 
             new_centroids = np.zeros_like(centroids)
             nearest_centroid_cnt = np.full(self.n_cluster, 1e-6)
-            for idx in random_indices:
+            for idx in indices:
                 currSongs, currRatings = self.get_songs_and_ratings(idx)
                 dists = [centroid_norms[i] - l2_norm(centroids[i, currSongs] - 3) + l2_norm(currRatings - centroids[i, currSongs]) for i in range(self.n_cluster)]
                 nearest_centroid_idx = np.argmin(dists)
@@ -150,8 +154,6 @@ class KMeansRecommender():
         self.cluster = [[] for _ in range(self.n_cluster)]
         centroid_norms = [l2_norm(centroid - 3) for centroid in centroids]
         for userID in range(self.n_userID):
-            if userID % 10000 == 0:
-                print(userID)
             userSongs, userRatings = self.get_songs_and_ratings(userID)
             dists = [centroid_norms[i] - l2_norm(centroids[i, userSongs] - 3) + l2_norm(userRatings - centroids[i, userSongs]) for i in range(self.n_cluster)]
             centroid_idx = np.argmin(dists)
@@ -166,7 +168,7 @@ class KMeansRecommender():
         userSongs, userRatings = self.get_songs_and_ratings(userID)
         userNorm = l2_norm(userRatings)
         
-        userVector = np.zeros(self.n_userID)
+        userVector = np.zeros(self.n_songID)
         userVector[userSongs] = userRatings
         
         clustered_users = self.cluster[self.nearest_centroid[userID]]
@@ -205,9 +207,9 @@ class KMeansRecommender():
 
         if sum == 0:
             # default rating if no similar user rates this song
-            return 0.
+            return 3
         else:
-            return sum / cnt
+            return round(sum / cnt)
     
     # given userID, find the recommendation for this user
     def predict(self, userID):
