@@ -166,7 +166,6 @@ cython_debug/
 *.pdf
 *.pkl
 *.xls
-*.xlsx
 *.zip
 data/
 *.pt
