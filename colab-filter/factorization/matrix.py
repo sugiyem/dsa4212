@@ -5,7 +5,7 @@ import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 
-train_data = pd.read_csv("./dataset/train_dataset.csv")
+train_data = pd.read_csv("../preprocessed_dataset/train_dataset.csv")
 
 user_num = max(train_data["user_id_idx"]) + 1
 item_num = max(train_data["item_id_idx"]) + 1
@@ -31,7 +31,15 @@ def _loss(A, U, V, w0):
 
 class MatrixFactorizationRecommender:
     def __init__(
-        self, d=100, w0=0.1, lr=0.1, model="gd", steps=100, loss_threshold=10, k=-1
+        self,
+        d=100,
+        w0=0.1,
+        lr=0.5,
+        model="gd",
+        steps=100,
+        loss_threshold=10,
+        batch_size=200,
+        k=-1,
     ) -> None:
         """
         d = embedding dimension
@@ -40,6 +48,7 @@ class MatrixFactorizationRecommender:
         model = factorization method ('gd', 'svd')
         steps = number of iterations
         loss_threshold = loss function threshold to stop iteration
+        batch_size = batch size for stochastic gradient descent
         k = features for SVD
         """
         self.d = d
@@ -48,6 +57,7 @@ class MatrixFactorizationRecommender:
         self.model = model
         self.steps = steps
         self.threshold = loss_threshold
+        self.batch_size = batch_size
         self.k = k
 
     def loss(self, A: jnp.ndarray, U: jnp.ndarray, V: jnp.ndarray):
@@ -64,6 +74,32 @@ class MatrixFactorizationRecommender:
             if i % 10 == 0:
                 print(f"Iteration {i}: loss {self.loss(A, self.U, self.V)}")
             if self.loss(A, self.U, self.V) < self.threshold:
+                break
+
+    def sgd(self, A: np.ndarray):
+        def sgd_loss(A, U, V):
+            diff = A - U @ V.T
+            return np.linalg.norm(diff) + self.w0 * (
+                np.linalg.norm(U) + np.linalg.norm(V)
+            )
+
+        self.U = np.random.normal(0, 1, size=(user_num, self.d))
+        self.V = np.random.normal(0, 1, size=(item_num, self.d))
+        for step in range(self.steps):
+            uu = np.random.choice(A.shape[0], (self.batch_size,))
+            ii = np.random.choice(A.shape[1], (self.batch_size,))
+            for j in range(self.batch_size):
+                u, i = uu[j], ii[j]
+                err = A[u, i] - self.U[u, :] @ self.V.T[:, i]
+                self.U[u, :] += (
+                    self.lr * 2 * (err * self.V[i, :] - self.w0 * self.U[u, :])
+                ) / self.d
+                self.V[i, :] += (
+                    self.lr * 2 * (err * self.U[u, :] - self.w0 * self.V[i, :])
+                ) / self.d
+            if step % 10 == 0:
+                print(f"Iteration {step}: loss {sgd_loss(A, self.U, self.V)}")
+            if sgd_loss(A, self.U, self.V) < self.threshold:
                 break
 
     def svd(self, A: np.ndarray):
@@ -87,6 +123,8 @@ class MatrixFactorizationRecommender:
         start_time = time()
         if self.model == "gd":
             self.gd(A)
+        elif self.model == "sgd":
+            self.sgd(A)
         elif self.model == "svd":
             self.svd(A)
         else:
@@ -95,5 +133,5 @@ class MatrixFactorizationRecommender:
         print(f"Elapsed time = {end_time - start_time} seconds")
 
 
-r = MatrixFactorizationRecommender(model="gd")
+r = MatrixFactorizationRecommender(model="sgd")
 r.fit(A)
