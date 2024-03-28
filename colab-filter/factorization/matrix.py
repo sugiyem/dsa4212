@@ -3,9 +3,6 @@ from time import time
 import jax
 import jax.numpy as jnp
 import numpy as np
-import pandas as pd
-
-train_data = pd.read_csv("../preprocessed_dataset/train_dataset.csv")
 
 
 @jax.jit
@@ -99,11 +96,13 @@ class MatrixFactorizationRecommender:
         if self.k != -1:
             u = u[:, : self.k]
             vt = vt[: self.k, :]
-            sigma = np.eye(self.k) * sigma[: self.k]
-        self.U = u.astype(float).reshape(-1, 1)
-        self.sigma = sigma.astype(float).reshape(-1, 1)
-        self.V = vt.T.astype(float).reshape(-1, 1)
-        print(self.loss(A, self.U, self.V))
+            self.sigma = np.eye(self.k) * sigma[: self.k]
+        else:
+            self.sigma = np.zeros((5000, 20361))
+            for i in range(sigma.shape[0]):
+                self.sigma[i, i] = sigma[i]
+        self.U = u.astype(float) @ self.sigma
+        self.V = vt.T.astype(float)
 
     def als(self, A: np.ndarray):
         n, m = A.shape
@@ -191,10 +190,7 @@ class MatrixFactorizationRecommender:
         print(f"Elapsed time = {end_time - start_time} seconds")
 
     def predict(self, test_data):
-        if self.model == "svd":
-            prediction = self.U @ self.sigma @ self.V.T
-        else:
-            prediction = self.U @ self.V.T
+        prediction = self.U @ self.V.T
 
         TP, TN, FP, FN = 0, 0, 0, 0
 
@@ -212,15 +208,9 @@ class MatrixFactorizationRecommender:
             else:
                 TN += 1
 
-        precision = TP / (TP + FP)
-        recall = TP / (TP + FN)
         return {
             "TP": TP,
             "FP": FP,
             "FN": FN,
             "TN": TN,
-            "accuracy": (TP + TN) / (TP + TN + FP + FN),
-            "precision": precision,
-            "recall": recall,
-            "f1": 2 * precision * recall / (precision + recall),
         }
