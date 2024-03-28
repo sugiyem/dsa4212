@@ -32,7 +32,7 @@ def _loss(A, U, V, w0):
 class MatrixFactorizationRecommender:
     def __init__(
         self,
-        d=100,
+        d=10,
         w0=0.1,
         lr=0.5,
         model="gd",
@@ -68,6 +68,7 @@ class MatrixFactorizationRecommender:
 
     def gd(self, A: np.ndarray):
         A = jnp.array(A)
+        self.U, self.V = jnp.array(self.U), jnp.array(self.V)
         for i in range(self.steps):
             self.U -= self.lr * self.gradient(self.loss, 1)(A, self.U, self.V)
             self.V -= self.lr * self.gradient(self.loss, 2)(A, self.U, self.V)
@@ -111,14 +112,67 @@ class MatrixFactorizationRecommender:
         self.U = u.astype(float).reshape(-1, 1)
         self.sigma = sigma.astype(float).reshape(-1, 1)
         self.V = vt.T.astype(float).reshape(-1, 1)
-        print(self.U.dtype, self.V.dtype, self.sigma.dtype)
         print(self.loss(A, self.U, self.V))
+
+    def als(self, A: np.ndarray):
+        n, m = A.shape
+
+        def als_loss(A, U, V):
+            w = U @ V.T
+            loss = 0
+            for i in range(n):
+                for j in range(m):
+                    if A[i, j] != 0:
+                        loss += np.sum(np.square(A[i, j] - w[i, j]))
+            return loss
+
+        for step in range(self.steps):
+            # fix V
+            self.U = (
+                A
+                @ self.V
+                @ (np.linalg.inv(self.V.T @ self.V + self.w0 * np.identity(self.d)))
+            )
+            # fix U
+            self.V = (
+                A.T
+                @ self.U
+                @ np.linalg.inv(self.U.T @ self.U + self.w0 * np.identity(self.d))
+            )
+            print(f"Iteration {step}: loss {als_loss(A, self.U, self.V)}")
+            if als_loss(A, self.U, self.V) < self.threshold:
+                break
+
+    def als_solve(self, A: np.ndarray):
+        n, m = A.shape
+
+        def als_loss(A, U, V):
+            w = U @ V.T
+            loss = 0
+            for i in range(n):
+                for j in range(m):
+                    if A[i, j] != 0:
+                        loss += np.sum(np.square(A[i, j] - w[i, j]))
+            return loss
+
+        for step in range(self.steps):
+            # fix V
+            self.U = np.linalg.solve(
+                (self.V.T @ self.V + self.w0 * np.identity(self.d)), self.V.T @ A.T
+            ).T
+            # fix U
+            self.V = np.linalg.solve(
+                (self.U.T @ self.U + self.w0 * np.identity(self.d)), self.U.T @ A
+            ).T
+            print(f"Iteration {step}: loss {als_loss(A, self.U, self.V)}")
+            if als_loss(A, self.U, self.V) < self.threshold:
+                break
 
     def fit(self, A: np.ndarray):
         # U = user embedding matrix of size (user_num, d)
         # V = item embedding matrix of size (item_num, d)
-        self.U = jnp.array(np.random.normal(0, 1, size=(user_num, self.d)))
-        self.V = jnp.array(np.random.normal(0, 1, size=(item_num, self.d)))
+        self.U = np.random.normal(0, 1, size=(user_num, self.d))
+        self.V = np.random.normal(0, 1, size=(item_num, self.d))
 
         start_time = time()
         if self.model == "gd":
@@ -127,11 +181,15 @@ class MatrixFactorizationRecommender:
             self.sgd(A)
         elif self.model == "svd":
             self.svd(A)
+        elif self.model == "als":
+            self.als(A)
+        elif self.model == "als_solve":
+            self.als_solve(A)
         else:
             raise ValueError("Invalid model specified")
         end_time = time()
         print(f"Elapsed time = {end_time - start_time} seconds")
 
 
-r = MatrixFactorizationRecommender(model="sgd")
+r = MatrixFactorizationRecommender(model="als_solve")
 r.fit(A)
