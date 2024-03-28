@@ -7,15 +7,6 @@ import pandas as pd
 
 train_data = pd.read_csv("../preprocessed_dataset/train_dataset.csv")
 
-user_num = max(train_data["user_id_idx"]) + 1
-item_num = max(train_data["item_id_idx"]) + 1
-
-# A = feedback matrix
-A = np.zeros((user_num, item_num))
-
-for _, row in train_data.iterrows():
-    A[row["user_id_idx"], row["item_id_idx"]] = row["rating"]
-
 
 @jax.jit
 def norm(x):
@@ -84,8 +75,8 @@ class MatrixFactorizationRecommender:
                 np.linalg.norm(U) + np.linalg.norm(V)
             )
 
-        self.U = np.random.normal(0, 1, size=(user_num, self.d))
-        self.V = np.random.normal(0, 1, size=(item_num, self.d))
+        self.U = np.random.normal(0, 1, size=(A.shape[0], self.d))
+        self.V = np.random.normal(0, 1, size=(A.shape[1], self.d))
         for step in range(self.steps):
             uu = np.random.choice(A.shape[0], (self.batch_size,))
             ii = np.random.choice(A.shape[1], (self.batch_size,))
@@ -168,7 +159,16 @@ class MatrixFactorizationRecommender:
             if als_loss(A, self.U, self.V) < self.threshold:
                 break
 
-    def fit(self, A: np.ndarray):
+    def fit(self, train_data):
+        user_num = max(train_data["user_id_idx"]) + 1
+        item_num = max(train_data["item_id_idx"]) + 1
+
+        # A = feedback matrix
+        A = np.zeros((user_num, item_num))
+
+        for _, row in train_data.iterrows():
+            A[row["user_id_idx"], row["item_id_idx"]] = row["rating"]
+
         # U = user embedding matrix of size (user_num, d)
         # V = item embedding matrix of size (item_num, d)
         self.U = np.random.normal(0, 1, size=(user_num, self.d))
@@ -190,6 +190,37 @@ class MatrixFactorizationRecommender:
         end_time = time()
         print(f"Elapsed time = {end_time - start_time} seconds")
 
+    def predict(self, test_data):
+        if self.model == "svd":
+            prediction = self.U @ self.sigma @ self.V.T
+        else:
+            prediction = self.U @ self.V.T
 
-r = MatrixFactorizationRecommender(model="als_solve")
-r.fit(A)
+        TP, TN, FP, FN = 0, 0, 0, 0
+
+        for _, row in test_data.iterrows():
+            item_idx = row["item_id_idx"]
+            user_idx = row["user_id_idx"]
+            rating = row["rating"]
+            pred = prediction[user_idx, item_idx]
+            if pred >= 3 and rating >= 3:
+                TP += 1
+            elif pred >= 3 and rating < 3:
+                FP += 1
+            elif pred < 3 and rating >= 3:
+                FN += 1
+            else:
+                TN += 1
+
+        precision = TP / (TP + FP)
+        recall = TP / (TP + FN)
+        return {
+            "TP": TP,
+            "FP": FP,
+            "FN": FN,
+            "TN": TN,
+            "accuracy": (TP + TN) / (TP + TN + FP + FN),
+            "precision": precision,
+            "recall": recall,
+            "f1": 2 * precision * recall / (precision + recall),
+        }
