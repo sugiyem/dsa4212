@@ -172,7 +172,10 @@ class PeepholeLSTM(LSTM):
             jnp.zeros(shape=(params.hidden_dim,))
         o_ls = []
         for i in range(time_steps):
-            c_t, o_t, h_t = PeepholeLSTM.forward(x_in[i,:], h, c, params.wout)
+            if len(x_in.shape) == 2:
+                c_t, o_t, h_t = PeepholeLSTM.forward(x_in[:,i], h, c, params.wout)
+            elif len(x_in.shape) == 3:
+                c_t, o_t, h_t = PeepholeLSTM.forward(x_in[:,i,:], h, c, params.wout)
             o_ls.append(o_t)
             h, o, c = h_t, o_t, c_t
         return jnp.array(o_ls)
