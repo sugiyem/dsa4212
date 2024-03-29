@@ -26,104 +26,140 @@ class LSTM:
 
     @staticmethod
     @jax.jit
-    def f_cur(params: LSTMParams, x_cur: jnp.ndarray, h_prev: jnp.ndarray) -> jnp.ndarray:
+    def f_cur(
+        params: LSTMParams, 
+        x_cur: jnp.ndarray, 
+        h_prev: jnp.ndarray
+    ) -> jnp.ndarray:
         return sigmoid((params.wf @ jnp.concatenate([h_prev, x_cur], axis=0)) + params.bf)
     
     @staticmethod
     @jax.jit
-    def i_cur(params: LSTMParams, x_cur: jnp.ndarray, h_prev: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+    def i_cur(
+        params: LSTMParams, 
+        x_cur: jnp.ndarray, 
+        h_prev: jnp.ndarray
+    ) -> tuple[jnp.ndarray, jnp.ndarray]:
         i_t = sigmoid((params.wi @ jnp.concatenate([h_prev, x_cur], axis=0)) + params.bi)
         c_t_hat = jnp.tanh((params.wc @ jnp.concatenate([h_prev, x_cur], axis=0)) + params.bc)
         return i_t, c_t_hat
 
     @staticmethod
     @jax.jit
-    def c_cur(x_cur: jnp.ndarray, h_prev: jnp.ndarray, c_prev: jnp.ndarray) -> jnp.ndarray:
-        i_t, c_t_hat = LSTM.i_cur(x_cur, h_prev)
-        return jnp.dot(LSTM.f_cur(x_cur, h_prev), c_prev) + jnp.dot(i_t, c_t_hat)
+    def c_cur(
+        params: LSTMParams, 
+        x_cur: jnp.ndarray, 
+        h_prev: jnp.ndarray, 
+        c_prev: jnp.ndarray
+    ) -> jnp.ndarray:
+        i_t, c_t_hat = LSTM.i_cur(params, x_cur, h_prev)
+        return jnp.dot(LSTM.f_cur(params, x_cur, h_prev), c_prev) + jnp.dot(i_t, c_t_hat)
         
     
     @staticmethod
     @jax.jit
-    def o_cur(params: LSTMParams, x_cur: jnp.ndarray, h_prev: jnp.ndarray) -> jnp.ndarray:
+    def o_cur(
+        params: LSTMParams, 
+        x_cur: jnp.ndarray, 
+        h_prev: jnp.ndarray
+    ) -> jnp.ndarray:
         return sigmoid((params.wo @ jnp.concatenate([h_prev, x_cur], axis=0)) + params.bo)
     
     @staticmethod
     @jax.jit
-    def h_cur(x_cur: jnp.ndarray, h_prev: jnp.ndarray, c_prev: jnp.ndarray) -> jnp.ndarray:
-        return jnp.dot(LSTM.o_cur(x_cur, h_prev), jnp.tanh(LSTM.c_cur(x_cur, h_prev, c_prev)))
+    def h_cur(
+        params: LSTMParams, 
+        x_cur: jnp.ndarray, 
+        h_prev: jnp.ndarray, 
+        c_prev: jnp.ndarray
+    ) -> jnp.ndarray:
+        return jnp.dot(LSTM.o_cur(params, x_cur, h_prev), 
+                       jnp.tanh(LSTM.c_cur(params, x_cur, h_prev, c_prev)))
         
     @staticmethod
     @jax.jit
     def forward(
+        params: LSTMParams,
         x_cur: jnp.ndarray, 
         h_prev: jnp.ndarray, 
         c_prev: jnp.ndarray,
         wout: jnp.ndarray
     ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
-        h_t = LSTM.h_cur(x_cur, h_prev, c_prev)
+        h_t = LSTM.h_cur(params, x_cur, h_prev, c_prev)
         o_t = wout @ h_t
-        return (LSTM.c_cur(x_cur, h_prev, c_prev), o_t, h_t)
+        return (LSTM.c_cur(params, x_cur, h_prev, c_prev), o_t, h_t)
 
     @staticmethod
     @jax.jit
-    def forward_full(params: LSTMParams, x_in: jnp.ndarray) -> jnp.ndarray:
+    def forward_full(
+        params: LSTMParams, 
+        x_in: jnp.ndarray
+    ) -> jnp.ndarray:
         time_steps = x_in.shape[0]
-        h, o, c = jnp.zeros(shape=(params.hidden_dim,)), jnp.zeros(shape=(params.output_dim,)), jnp.zeros(shape=(params.hidden_dim,))
+        h, o, c = jnp.zeros(shape=(params.hidden_dim,)), jnp.zeros(shape=(params.output_dim,)), \
+            jnp.zeros(shape=(params.hidden_dim,))
         o_ls = []
         for i in range(len(time_steps)):
-            c_t, o_t, h_t = LSTM.forward(x_in[i,:], h, c, params.wout)
+            c_t, o_t, h_t = LSTM.forward(params, x_in[i,:], h, c, params.wout)
             o_ls.append(o_t)
             h, o, c = h_t, o_t, c_t
 
         return jnp.array(o_ls)
 
-    @staticmethod
-    @jax.jit
-    def backward_full(
-        params: LSTMParams, 
-        f: Callable[[jnp.ndarray, jnp.ndarray, jnp.ndarray], jnp.ndarray], 
-        o_out: jnp.ndarray, 
-        y_true: jnp.ndarray
-    ) -> tuple[jnp.ndarray, jnp.ndarray]:
-        assert o_out.shape == y_true.shape, "h_out and y_true must have the same shape"
-        f_batch = jax.jit(jax.vmap(f, in_axes=(0,)))
-        loss = f_batch(params, o_out, y_true)
-        f_batch_grad = jax.jit(jax.grad(f_batch))
-        loss_grad = f_batch_grad(params, o_out, y_true)
-        return loss, loss_grad
-            
 class PeepholeLSTM(LSTM):
     @staticmethod
     @jax.jit
-    def f_cur(params: LSTMParams, x_cur: jnp.ndarray, h_prev: jnp.ndarray, c_prev: jnp.ndarray) -> jnp.ndarray:
+    def f_cur(
+        params: LSTMParams, 
+        x_cur: jnp.ndarray, 
+        h_prev: jnp.ndarray, 
+        c_prev: jnp.ndarray
+    ) -> jnp.ndarray:
         return sigmoid(params.wf @ jnp.concatenate([c_prev, h_prev, x_cur], axis=0) + params.bf)
 
     @staticmethod
     @jax.jit
-    def i_cur(params: LSTMParams, x_cur: jnp.ndarray, h_prev: jnp.ndarray, c_prev: jnp.ndarray) -> jnp.ndarray:
+    def i_cur(
+        params: LSTMParams, 
+        x_cur: jnp.ndarray, 
+        h_prev: jnp.ndarray, 
+        c_prev: jnp.ndarray
+    ) -> jnp.ndarray:
         return sigmoid(params.wi @ jnp.concatenate([c_prev, h_prev, x_cur], axis=0) + params.bi)
     
     @staticmethod
     @jax.jit
-    def o_cur(params: LSTMParams, x_cur: jnp.ndarray, h_prev: jnp.ndarray, c_cur: jnp.ndarray) -> jnp.ndarray:
+    def o_cur(
+        params: LSTMParams, 
+        x_cur: jnp.ndarray, 
+        h_prev: jnp.ndarray, 
+        c_cur: jnp.ndarray
+    ) -> jnp.ndarray:
         return sigmoid(params.wo @ jnp.concatenate([c_cur, h_prev, x_cur], axis=0) + params.bo)
 
     @staticmethod
     @jax.jit
-    def h_cur(x_cur: jnp.ndarray, h_prev: jnp.ndarray, c_prev: jnp.ndarray, c_t: jnp.ndarray) -> jnp.ndarray:
-        return jnp.dot(PeepholeLSTM.o_cur(x_cur, h_prev, c_t), jnp.tanh(PeepholeLSTM.c_cur(x_cur, h_prev, c_prev))) 
+    def h_cur(
+        params: LSTMParams, 
+        x_cur: jnp.ndarray, 
+        h_prev: jnp.ndarray, 
+        c_prev: jnp.ndarray, 
+        c_t: jnp.ndarray
+    ) -> jnp.ndarray:
+        return jnp.dot(PeepholeLSTM.o_cur(params, x_cur, h_prev, c_t), 
+                       jnp.tanh(PeepholeLSTM.c_cur(params, x_cur, h_prev, c_prev))) 
 
     @staticmethod
     @jax.jit
     def forward(
+        params: LSTMParams,
         x_cur: jnp.ndarray, 
         h_prev: jnp.ndarray, 
         c_prev: jnp.ndarray,
         wout: jnp.ndarray
     ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
-        c_t = PeepholeLSTM.c_cur(x_cur, h_prev, c_prev)
-        h_t = PeepholeLSTM.h_cur(x_cur, h_prev, c_prev, c_t)
+        c_t = PeepholeLSTM.c_cur(params, x_cur, h_prev, c_prev)
+        h_t = PeepholeLSTM.h_cur(params, x_cur, h_prev, c_prev, c_t)
         o_t = wout @ h_t
         return (c_t, o_t, h_t)
 
@@ -131,28 +167,14 @@ class PeepholeLSTM(LSTM):
     @jax.jit
     def forward_full(params: LSTMParams, x_in: jnp.ndarray) -> jnp.ndarray:
         time_steps = x_in.shape[0]
-        h, o, c = jnp.zeros(shape=(params.hidden_dim,)), jnp.zeros(shape=(params.output_dim,)), jnp.zeros(shape=(params.hidden_dim,))
+        h, o, c = jnp.zeros(shape=(params.hidden_dim,)), jnp.zeros(shape=(params.output_dim,)), \
+            jnp.zeros(shape=(params.hidden_dim,))
         o_ls = []
         for i in range(len(time_steps)):
             c_t, o_t, h_t = PeepholeLSTM.forward(x_in[i,:], h, c, params.wout)
             o_ls.append(o_t)
             h, o, c = h_t, o_t, c_t
         return jnp.array(o_ls)
-
-    @staticmethod
-    @jax.jit
-    def backward_full(
-        params: LSTMParams, 
-        f: Callable[[jnp.ndarray, jnp.ndarray, jnp.ndarray], jnp.ndarray], 
-        o_out: jnp.ndarray, 
-        y_true: jnp.ndarray
-    ) -> tuple[jnp.ndarray, jnp.ndarray]:
-        assert o_out.shape == y_true.shape, "h_out and y_true must have the same shape"
-        f_batch = jax.jit(jax.vmap(f, in_axes=(0,)))
-        loss = f_batch(params, o_out, y_true)
-        f_batch_grad = jax.jit(jax.grad(f_batch))
-        loss_grad = f_batch_grad(params, o_out, y_true)
-        return loss, loss_grad
 
 class LSTMModel:
     def init_params(
@@ -192,15 +214,3 @@ class LSTMModel:
             o_out = type(params.layers[0]).forward_full(cur_params, x_in)
         return o_out
         
-    def backward(
-        params: LSTMModelParams, 
-        f: Callable[[jnp.ndarray, jnp.ndarray, jnp.ndarray], jnp.ndarray], 
-        o_out: jnp.ndarray, 
-        y_true: jnp.ndarray
-    ) -> tuple[jnp.ndarray, jnp.ndarray]:
-        assert o_out.shape == y_true.shape, "h_out and y_true must have the same shape"
-        f_batch = jax.jit(jax.vmap(f, in_axes=(0,)))
-        loss = f_batch(params, o_out, y_true)
-        f_batch_grad = jax.jit(jax.grad(f_batch))
-        loss_grad = f_batch_grad(params, o_out, y_true)
-        return loss, loss_grad 
