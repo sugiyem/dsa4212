@@ -93,13 +93,15 @@ class LSTM:
         params: LSTMParams, 
         x_in: jnp.ndarray
     ) -> jnp.ndarray:
-        time_steps = x_in.shape[1]
+        time_steps = x_in.shape[0]
 
         h, o, c = jnp.zeros(shape=(params.hidden_dim, 1)), jnp.zeros(shape=(params.output_dim, 1)), \
             jnp.zeros(shape=(params.hidden_dim, 1))
         o_ls = []
         for i in range(time_steps):
-            if len(x_in.shape) == 2:
+            if len(x_in.shape) == 1:
+                c_t, o_t, h_t = LSTM.forward(params, x_in[i:i+1], h, c, params.wout)
+            elif len(x_in.shape) == 2:
                 c_t, o_t, h_t = LSTM.forward(params, x_in[:,i:i+1], h, c, params.wout)
             elif len(x_in.shape) == 3:
                 c_t, o_t, h_t = LSTM.forward(params, x_in[:,i:i+1,:], h, c, params.wout) 
@@ -172,7 +174,9 @@ class PeepholeLSTM(LSTM):
             jnp.zeros(shape=(params.hidden_dim,))
         o_ls = []
         for i in range(time_steps):
-            if len(x_in.shape) == 2:
+            if len(x_in.shape) == 1:
+                c_t, o_t, h_t = LSTM.forward(params, x_in[i:i+1], h, c, params.wout)
+            elif len(x_in.shape) == 2:
                 c_t, o_t, h_t = PeepholeLSTM.forward(x_in[:,i], h, c, params.wout)
             elif len(x_in.shape) == 3:
                 c_t, o_t, h_t = PeepholeLSTM.forward(x_in[:,i,:], h, c, params.wout)
