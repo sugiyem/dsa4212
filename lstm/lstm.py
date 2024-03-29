@@ -1,6 +1,5 @@
 import jax
 import jax.numpy as jnp
-from typing import Callable
 from utils import RANDOM_SEED, rng_normal, sigmoid, LSTMParams, \
     LSTMModelParams
 
@@ -13,14 +12,14 @@ class LSTM:
         output_dim: int
     ) -> LSTMParams:
         key = jax.random.PRNGKey(seed)
-        wf = rng_normal(key=key, shape=(hidden_dim, hidden_dim + input_dim))
-        bf = rng_normal(key=key, shape=(hidden_dim,))
-        wi = rng_normal(key=key, shape=(hidden_dim, hidden_dim + input_dim))
-        bi = rng_normal(key=key, shape=(hidden_dim,))
-        wc = rng_normal(key=key, shape=(hidden_dim, hidden_dim + input_dim))
-        bc = rng_normal(key=key, shape=(hidden_dim,))
-        wo = rng_normal(key=key, shape=(hidden_dim, hidden_dim + input_dim))
-        bo = rng_normal(key=key, shape=(hidden_dim,))
+        wf = rng_normal(key=key, shape=(hidden_dim, input_dim + hidden_dim))
+        bf = rng_normal(key=key, shape=(hidden_dim,1))
+        wi = rng_normal(key=key, shape=(hidden_dim, input_dim + hidden_dim))
+        bi = rng_normal(key=key, shape=(hidden_dim,1))
+        wc = rng_normal(key=key, shape=(hidden_dim, input_dim + hidden_dim))
+        bc = rng_normal(key=key, shape=(hidden_dim,1))
+        wo = rng_normal(key=key, shape=(hidden_dim, input_dim + hidden_dim))
+        bo = rng_normal(key=key, shape=(hidden_dim,1))
         wout = rng_normal(key=key, shape=(output_dim, hidden_dim))
         return LSTMParams(key, input_dim, hidden_dim, output_dim, wf, bf, wi, bi, wc, bc, wo, bo, wout)
 
@@ -53,7 +52,7 @@ class LSTM:
         c_prev: jnp.ndarray
     ) -> jnp.ndarray:
         i_t, c_t_hat = LSTM.i_cur(params, x_cur, h_prev)
-        return jnp.dot(LSTM.f_cur(params, x_cur, h_prev), c_prev) + jnp.dot(i_t, c_t_hat)
+        return jnp.multiply(LSTM.f_cur(params, x_cur, h_prev), c_prev) + jnp.multiply(i_t, c_t_hat)
         
     
     @staticmethod
@@ -73,7 +72,7 @@ class LSTM:
         h_prev: jnp.ndarray, 
         c_prev: jnp.ndarray
     ) -> jnp.ndarray:
-        return jnp.dot(LSTM.o_cur(params, x_cur, h_prev), 
+        return jnp.multiply(LSTM.o_cur(params, x_cur, h_prev), 
                        jnp.tanh(LSTM.c_cur(params, x_cur, h_prev, c_prev)))
         
     @staticmethod
@@ -90,17 +89,20 @@ class LSTM:
         return (LSTM.c_cur(params, x_cur, h_prev, c_prev), o_t, h_t)
 
     @staticmethod
-    @jax.jit
     def forward_full(
         params: LSTMParams, 
         x_in: jnp.ndarray
     ) -> jnp.ndarray:
-        time_steps = x_in.shape[0]
-        h, o, c = jnp.zeros(shape=(params.hidden_dim,)), jnp.zeros(shape=(params.output_dim,)), \
-            jnp.zeros(shape=(params.hidden_dim,))
+        time_steps = x_in.shape[1]
+
+        h, o, c = jnp.zeros(shape=(params.hidden_dim, 1)), jnp.zeros(shape=(params.output_dim, 1)), \
+            jnp.zeros(shape=(params.hidden_dim, 1))
         o_ls = []
-        for i in range(len(time_steps)):
-            c_t, o_t, h_t = LSTM.forward(params, x_in[i,:], h, c, params.wout)
+        for i in range(time_steps):
+            if len(x_in.shape) == 2:
+                c_t, o_t, h_t = LSTM.forward(params, x_in[:,i:i+1], h, c, params.wout)
+            elif len(x_in.shape) == 3:
+                c_t, o_t, h_t = LSTM.forward(params, x_in[:,i:i+1,:], h, c, params.wout) 
             o_ls.append(o_t)
             h, o, c = h_t, o_t, c_t
 
@@ -146,7 +148,7 @@ class PeepholeLSTM(LSTM):
         c_prev: jnp.ndarray, 
         c_t: jnp.ndarray
     ) -> jnp.ndarray:
-        return jnp.dot(PeepholeLSTM.o_cur(params, x_cur, h_prev, c_t), 
+        return jnp.multiply(PeepholeLSTM.o_cur(params, x_cur, h_prev, c_t), 
                        jnp.tanh(PeepholeLSTM.c_cur(params, x_cur, h_prev, c_prev))) 
 
     @staticmethod
@@ -164,13 +166,12 @@ class PeepholeLSTM(LSTM):
         return (c_t, o_t, h_t)
 
     @staticmethod
-    @jax.jit
     def forward_full(params: LSTMParams, x_in: jnp.ndarray) -> jnp.ndarray:
         time_steps = x_in.shape[0]
         h, o, c = jnp.zeros(shape=(params.hidden_dim,)), jnp.zeros(shape=(params.output_dim,)), \
             jnp.zeros(shape=(params.hidden_dim,))
         o_ls = []
-        for i in range(len(time_steps)):
+        for i in range(time_steps):
             c_t, o_t, h_t = PeepholeLSTM.forward(x_in[i,:], h, c, params.wout)
             o_ls.append(o_t)
             h, o, c = h_t, o_t, c_t
