@@ -1,7 +1,7 @@
 import jax
 import jax.numpy as jnp
 from typing import Callable
-from utils import RANDOM_SEED, rng_unif, sigmoid, LSTMParams, \
+from utils import RANDOM_SEED, rng_normal, sigmoid, LSTMParams, \
     LSTMModelParams
 
 class LSTM:
@@ -13,15 +13,15 @@ class LSTM:
         output_dim: int
     ) -> LSTMParams:
         key = jax.random.PRNGKey(seed)
-        wf = rng_unif(key=key, shape=(hidden_dim, hidden_dim + input_dim))
-        bf = rng_unif(key=key, shape=(hidden_dim,))
-        wi = rng_unif(key=key, shape=(hidden_dim, hidden_dim + input_dim))
-        bi = rng_unif(key=key, shape=(hidden_dim,))
-        wc = rng_unif(key=key, shape=(hidden_dim, hidden_dim + input_dim))
-        bc = rng_unif(key=key, shape=(hidden_dim,))
-        wo = rng_unif(key=key, shape=(hidden_dim, hidden_dim + input_dim))
-        bo = rng_unif(key=key, shape=(hidden_dim,))
-        wout = rng_unif(key=key, shape=(output_dim, hidden_dim))
+        wf = rng_normal(key=key, shape=(hidden_dim, hidden_dim + input_dim))
+        bf = rng_normal(key=key, shape=(hidden_dim,))
+        wi = rng_normal(key=key, shape=(hidden_dim, hidden_dim + input_dim))
+        bi = rng_normal(key=key, shape=(hidden_dim,))
+        wc = rng_normal(key=key, shape=(hidden_dim, hidden_dim + input_dim))
+        bc = rng_normal(key=key, shape=(hidden_dim,))
+        wo = rng_normal(key=key, shape=(hidden_dim, hidden_dim + input_dim))
+        bo = rng_normal(key=key, shape=(hidden_dim,))
+        wout = rng_normal(key=key, shape=(output_dim, hidden_dim))
         return LSTMParams(key, input_dim, hidden_dim, output_dim, wf, bf, wi, bi, wc, bc, wo, bo, wout)
 
     @staticmethod

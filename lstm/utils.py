@@ -12,6 +12,9 @@ def sigmoid(x: jnp.ndarray) -> jnp.ndarray:
 def rng_unif(key: Array, shape: tuple[int, int]) -> jnp.ndarray:
     return jax.random.uniform(key=key, shape=shape)
 
+def rng_normal(key: Array, shape: tuple[int, int]) -> jnp.ndarray:
+    return jax.random.normal(key=key, shape=shape)
+
 class LSTMParams(NamedTuple):
     key: Array
     input_dim: int
