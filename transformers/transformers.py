@@ -1,5 +1,6 @@
 import jax
 import jax.numpy as jnp
+import numpy as np
 from utils import InputParams, MultiHeadAttnParams, softmax, rng_unif, relu, basic_normalize
 
 class Attention:
@@ -82,6 +83,20 @@ class FeedForwardNetwork:
         y = y @ self.layer2_matrix 
         return y
 
+class Embedding:
+    def __init__(
+        self,
+        key: jax.Array,
+        num_vocab: int,
+        model_dim: int
+    ):
+        self.num_vocab = num_vocab 
+        self.model_dim = model_dim
+        self.embed_matrix = rng_unif(key=key, shape=(num_vocab, model_dim))
+
+    def embed(self, x: jnp.ndarray) -> jnp.ndarray:
+        return self.embed_matrix[x] * jnp.sqrt(self.model_dim)
+    
 # Single encoder will have one multi-head attention and one feed forward NN
 class SingleEncoder:
     def __init__(
