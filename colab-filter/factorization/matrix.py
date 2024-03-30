@@ -22,20 +22,18 @@ class MatrixFactorizationRecommender:
         self,
         d=10,
         w0=0.1,
-        lr=0.5,
+        lr=0.001,
         model="gd",
         steps=100,
-        loss_threshold=10,
         batch_size=200,
-        k=-1,
+        k=10,
     ) -> None:
         """
         d = embedding dimension
         w0 = regularization weight
         lr = learning rate
-        model = factorization method ('gd', 'svd')
+        model = factorization method ('gd', 'sgd', 'svd', 'als', 'als_solve')
         steps = number of iterations
-        loss_threshold = loss function threshold to stop iteration
         batch_size = batch size for stochastic gradient descent
         k = features for SVD
         """
@@ -44,36 +42,36 @@ class MatrixFactorizationRecommender:
         self.lr = lr
         self.model = model
         self.steps = steps
-        self.threshold = loss_threshold
         self.batch_size = batch_size
         self.k = k
+        self.prediction = None
 
-    def loss(self, A: jnp.ndarray, U: jnp.ndarray, V: jnp.ndarray):
-        return _loss(A, U, V, self.w0)
+    def loss(self, A: np.ndarray, U: np.ndarray, V: np.ndarray):
+        n, m = A.shape
+        w = U @ V.T
+        loss = 0
+        for i in range(n):
+            for j in range(m):
+                if A[i, j] != 0:
+                    loss += np.sum(np.square(A[i, j] - w[i, j]))
+        return loss + self.w0 * (np.sum(np.square(U)) + np.sum(np.square(V)))
 
     def gradient(self, fun, argnums):
         return jax.jit(jax.grad(fun, argnums=argnums))
 
     def gd(self, A: np.ndarray):
+        def gd_loss(A, U, V):
+            return _loss(A, U, V, self.w0)
+
         A = jnp.array(A)
         self.U, self.V = jnp.array(self.U), jnp.array(self.V)
-        for i in range(self.steps):
-            self.U -= self.lr * self.gradient(self.loss, 1)(A, self.U, self.V)
-            self.V -= self.lr * self.gradient(self.loss, 2)(A, self.U, self.V)
-            if i % 10 == 0:
-                print(f"Iteration {i}: loss {self.loss(A, self.U, self.V)}")
-            if self.loss(A, self.U, self.V) < self.threshold:
-                break
+        for step in range(self.steps):
+            self.U -= self.lr * self.gradient(gd_loss, 1)(A, self.U, self.V)
+            self.V -= self.lr * self.gradient(gd_loss, 2)(A, self.U, self.V)
+            if step % 10 == 0:
+                print(step)
 
     def sgd(self, A: np.ndarray):
-        def sgd_loss(A, U, V):
-            diff = A - U @ V.T
-            return np.linalg.norm(diff) + self.w0 * (
-                np.linalg.norm(U) + np.linalg.norm(V)
-            )
-
-        self.U = np.random.normal(0, 1, size=(A.shape[0], self.d))
-        self.V = np.random.normal(0, 1, size=(A.shape[1], self.d))
         for step in range(self.steps):
             uu = np.random.choice(A.shape[0], (self.batch_size,))
             ii = np.random.choice(A.shape[1], (self.batch_size,))
@@ -86,10 +84,6 @@ class MatrixFactorizationRecommender:
                 self.V[i, :] += (
                     self.lr * 2 * (err * self.U[u, :] - self.w0 * self.V[i, :])
                 ) / self.d
-            if step % 10 == 0:
-                print(f"Iteration {step}: loss {sgd_loss(A, self.U, self.V)}")
-            if sgd_loss(A, self.U, self.V) < self.threshold:
-                break
 
     def svd(self, A: np.ndarray):
         u, sigma, vt = np.linalg.svd(A)
@@ -104,18 +98,20 @@ class MatrixFactorizationRecommender:
         self.U = u.astype(float) @ self.sigma
         self.V = vt.T.astype(float)
 
+        for step in range(self.steps):
+            uu = np.random.choice(A.shape[0], (self.batch_size,))
+            ii = np.random.choice(A.shape[1], (self.batch_size,))
+            for j in range(self.batch_size):
+                u, i = uu[j], ii[j]
+                err = A[u, i] - self.U[u, :] @ self.V.T[:, i]
+                self.U[u, :] += (
+                    self.lr * 2 * (err * self.V[i, :] - self.w0 * self.U[u, :])
+                ) / self.d
+                self.V[i, :] += (
+                    self.lr * 2 * (err * self.U[u, :] - self.w0 * self.V[i, :])
+                ) / self.d
+
     def als(self, A: np.ndarray):
-        n, m = A.shape
-
-        def als_loss(A, U, V):
-            w = U @ V.T
-            loss = 0
-            for i in range(n):
-                for j in range(m):
-                    if A[i, j] != 0:
-                        loss += np.sum(np.square(A[i, j] - w[i, j]))
-            return loss
-
         for step in range(self.steps):
             # fix V
             self.U = (
@@ -129,22 +125,8 @@ class MatrixFactorizationRecommender:
                 @ self.U
                 @ np.linalg.inv(self.U.T @ self.U + self.w0 * np.identity(self.d))
             )
-            print(f"Iteration {step}: loss {als_loss(A, self.U, self.V)}")
-            if als_loss(A, self.U, self.V) < self.threshold:
-                break
 
     def als_solve(self, A: np.ndarray):
-        n, m = A.shape
-
-        def als_loss(A, U, V):
-            w = U @ V.T
-            loss = 0
-            for i in range(n):
-                for j in range(m):
-                    if A[i, j] != 0:
-                        loss += np.sum(np.square(A[i, j] - w[i, j]))
-            return loss
-
         for step in range(self.steps):
             # fix V
             self.U = np.linalg.solve(
@@ -154,9 +136,6 @@ class MatrixFactorizationRecommender:
             self.V = np.linalg.solve(
                 (self.U.T @ self.U + self.w0 * np.identity(self.d)), self.U.T @ A
             ).T
-            print(f"Iteration {step}: loss {als_loss(A, self.U, self.V)}")
-            if als_loss(A, self.U, self.V) < self.threshold:
-                break
 
     def fit(self, train_data):
         user_num = max(train_data["user_id_idx"]) + 1
@@ -173,6 +152,7 @@ class MatrixFactorizationRecommender:
         self.U = np.random.normal(0, 1, size=(user_num, self.d))
         self.V = np.random.normal(0, 1, size=(item_num, self.d))
 
+        print(f"Initial loss: {self.loss(A, self.U, self.V)}")
         start_time = time()
         if self.model == "gd":
             self.gd(A)
@@ -188,8 +168,62 @@ class MatrixFactorizationRecommender:
             raise ValueError("Invalid model specified")
         end_time = time()
         print(f"Elapsed time = {end_time - start_time} seconds")
+        print(f"Final loss: {self.loss(A, self.U, self.V)}")
+        del A
 
-    def predict(self, test_data):
+    def predict_top_k(self, user_idx, k=3, prediction=None):
+        """
+        Given a user index and k, return top k recommended songs for the user.
+        """
+        if prediction is None:
+            prediction = self.U @ self.V.T
+
+        ratings = prediction[user_idx, :]
+        ratings = [(i, ratings[i]) for i in range(len(ratings))]
+        ratings.sort(key=lambda x: x[1], reverse=True)
+        return [i[0] for i in ratings[:k]]
+
+    def evaluate_top_k(self, test_data):
+        """
+        Given test data, evaluate the model performance by giving top 3 song recommendations
+        to users in the test data.
+        A rating is considered positive if rating >= 3.
+        True Positive if the recommendation is in the test data.
+        False Positive if the recommendation is not in the test data.
+        """
+        TP, FP = 0, 0
+
+        test = {}
+        for _, row in test_data.iterrows():
+            item_idx = row["item_id_idx"]
+            user_idx = row["user_id_idx"]
+            rating = row["rating"]
+            if rating >= 3:
+                if user_idx not in test:
+                    test[user_idx] = []
+                test[user_idx].append(item_idx)
+
+        prediction = self.U @ self.V.T
+        prediction = np.fliplr(np.argsort(prediction))
+        for user_idx in sorted(list(test.keys())):
+            ratings = prediction[user_idx, :][:3]
+            for p in ratings:
+                if p in test[user_idx]:
+                    TP += 1
+                else:
+                    FP += 1
+        return {"TP": TP, "FP": FP, "precision": TP / (TP + FP) if TP + FP > 0 else 0}
+
+    def evaluate(self, test_data):
+        """
+        Given test data, evaluate the model performance by predicting
+        the song ratings for users and songs in the test data.
+        A rating is considered positive if rating >= 3.
+        True Positive if both prediction and test data have positive ratings.
+        False Positive if positive prediction but negative in test data.
+        False Negative if negative prediction but positive in test data.
+        True Negative if both prediction and test data have negative ratings.
+        """
         prediction = self.U @ self.V.T
 
         TP, TN, FP, FN = 0, 0, 0, 0
@@ -213,4 +247,5 @@ class MatrixFactorizationRecommender:
             "FP": FP,
             "FN": FN,
             "TN": TN,
+            "precision": TP / (TP + FP) if TP + FP > 0 else 0,
         }
