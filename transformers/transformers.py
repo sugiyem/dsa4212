@@ -97,6 +97,24 @@ class Embedding:
     def embed(self, x: jnp.ndarray) -> jnp.ndarray:
         return self.embed_matrix[x] * jnp.sqrt(self.model_dim)
     
+class PositionalEncoder:
+    def __init__(
+        self,
+        model_dim: int,
+        max_seq_len: int = 5000
+    ):
+        position = np.arange(max_seq_len)[:, np.newaxis]
+        div_term = np.exp(np.arange(0, model_dim, 2) * -(np.log(10000.0) / model_dim))
+        
+        self.position_encoding = np.zeros((max_seq_len, model_dim))
+        self.position_encoding[:, 0::2] = np.sin(position * div_term)
+        self.position_encoding[:, 1::2] = np.cos(position * div_term)
+        self.position_encoding = jnp.array(self.position_encoding[np.newaxis, :])
+
+    def encode(self, x: jnp.ndarray) -> jnp.ndarray:
+        seq_len = x.shape[1]
+        return x + self.position_encoding[:, :seq_len]
+    
 # Single encoder will have one multi-head attention and one feed forward NN
 class SingleEncoder:
     def __init__(
