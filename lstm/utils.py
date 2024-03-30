@@ -20,10 +20,6 @@ def mse(y_pred: jnp.ndarray, y_true: jnp.ndarray) -> jnp.ndarray:
     return jnp.mean((y_pred - y_true) ** 2)
 
 class LSTMParams(NamedTuple):
-    key: Array
-    input_dim: int
-    hidden_dim: int
-    output_dim: int
     wf: jnp.ndarray
     bf: jnp.ndarray
     wi: jnp.ndarray
@@ -34,7 +30,14 @@ class LSTMParams(NamedTuple):
     bo: jnp.ndarray
     wout: jnp.ndarray
 
+class LSTMArchiParams(NamedTuple):
+    key: Array
+    input_dim: int
+    hidden_dim: int
+    output_dim: int
+
 class LSTMModelParams(NamedTuple):
     num_lstm: int
     lstm_type: str
     layers: list[LSTMParams]
+    

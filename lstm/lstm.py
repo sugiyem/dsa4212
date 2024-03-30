@@ -1,7 +1,7 @@
 import jax
 import jax.numpy as jnp
 from utils import RANDOM_SEED, rng_normal, sigmoid, LSTMParams, \
-    LSTMModelParams
+    LSTMModelParams, LSTMArchiParams
 
 class LSTM:
     @staticmethod
@@ -10,7 +10,7 @@ class LSTM:
         input_dim: int,
         hidden_dim: int,
         output_dim: int
-    ) -> LSTMParams:
+    ) -> tuple[LSTMArchiParams, LSTMParams]:
         key = jax.random.PRNGKey(seed)
         wf = rng_normal(key=key, shape=(hidden_dim, input_dim + hidden_dim))
         bf = rng_normal(key=key, shape=(hidden_dim,1))
@@ -21,7 +21,7 @@ class LSTM:
         wo = rng_normal(key=key, shape=(hidden_dim, input_dim + hidden_dim))
         bo = rng_normal(key=key, shape=(hidden_dim,1))
         wout = rng_normal(key=key, shape=(output_dim, hidden_dim))
-        return LSTMParams(key, input_dim, hidden_dim, output_dim, wf, bf, wi, bi, wc, bc, wo, bo, wout)
+        return LSTMArchiParams(key, input_dim, hidden_dim, output_dim), LSTMParams(wf, bf, wi, bi, wc, bc, wo, bo, wout)
 
     @staticmethod
     @jax.jit
@@ -90,12 +90,13 @@ class LSTM:
 
     @staticmethod
     def forward_full(
+        archi_params: LSTMArchiParams,
         params: LSTMParams, 
         x_in: jnp.ndarray
     ) -> jnp.ndarray:
         time_steps = x_in.shape[1]
-        h, o, c = jnp.zeros(shape=(params.hidden_dim, 1)), jnp.zeros(shape=(params.output_dim, 1)), \
-            jnp.zeros(shape=(params.hidden_dim, 1))
+        h, o, c = jnp.zeros(shape=(archi_params.hidden_dim, 1)), jnp.zeros(shape=(archi_params.output_dim, 1)), \
+            jnp.zeros(shape=(archi_params.hidden_dim, 1))
         o_ls = []
         for i in range(time_steps):
             if len(x_in.shape) == 1:
@@ -110,29 +111,32 @@ class LSTM:
     
     @staticmethod
     def forward_batch(
+        archi_params: LSTMArchiParams,
         params: LSTMParams,
         x_batch: jnp.ndarray
     ) -> jnp.ndarray:
-        forward_full_batch = jax.vmap(LSTM.forward_full, in_axes=(None, 0))
-        return jnp.squeeze(forward_full_batch(params, x_batch), axis=3)
+        forward_full_batch = jax.vmap(LSTM.forward_full, in_axes=(None, None, 0))
+        return jnp.squeeze(forward_full_batch(archi_params, params, x_batch), axis=3)
     
     @staticmethod
     def mse(
+        archi_params: LSTMArchiParams,
         params: LSTMParams,
         x_batch: jnp.ndarray,
         y_batch: jnp.ndarray
     ) -> tuple[jnp.ndarray, jnp.ndarray]:
-        batch_out = LSTM.forward_batch(params, x_batch)
-        return jnp.mean((batch_out - y_batch) ** 2)
+        batch_out = LSTM.forward_batch(archi_params, params, x_batch)
+        return jnp.mean((batch_out - y_batch) ** 2) * 100
     
     @staticmethod
     def backward(
+        archi_params: LSTMArchiParams,
         params: LSTMParams,
         x_batch: jnp.ndarray,
         y_batch: jnp.ndarray
     ) -> tuple[jnp.ndarray, jnp.ndarray]:
-        mse_grad = jax.jacobian(LSTM.mse, argnums=(0,), allow_int=True)
-        cur_grad = mse_grad(params, x_batch, y_batch)
+        mse_grad = jax.jacfwd(LSTM.mse, argnums=(1,))
+        cur_grad = mse_grad(archi_params, params, x_batch, y_batch)
         return cur_grad
 
 class PeepholeLSTM(LSTM):
@@ -227,7 +231,7 @@ class PeepholeLSTM(LSTM):
         y_batch: jnp.ndarray
     ) -> tuple[jnp.ndarray, jnp.ndarray]:
         batch_out = LSTM.forward_batch(params, x_batch)
-        return jnp.mean((batch_out - y_batch) ** 2)
+        return jnp.mean((batch_out - y_batch) ** 2) * 100
     
     @staticmethod
     def backward(
