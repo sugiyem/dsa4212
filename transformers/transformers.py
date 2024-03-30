@@ -114,6 +114,24 @@ class PositionalEncoder:
     def encode(self, x: jnp.ndarray) -> jnp.ndarray:
         seq_len = x.shape[1]
         return x + self.position_encoding[:, :seq_len]
+
+# Represents the whole pre-processing step before the real encoding steps in
+# Embeddding + Positional Encoding
+class Preprocessing:
+    def __init__(
+        self,
+        key: jax.Array,
+        num_vocab: int,
+        model_dim: int,
+        max_seq_len: int = 5000
+    ):
+        self.embedding = Embedding(key, num_vocab, model_dim)
+        self.positional_encoder = PositionalEncoder(model_dim, max_seq_len)
+
+    def preprocess(self, x: jnp.ndarray) -> jnp.ndarray:
+        y = self.embedding.embed(x)
+        y = self.positional_encoder.encode(y)
+        return y
     
 # Single encoder will have one multi-head attention and one feed forward NN
 class SingleEncoder:
@@ -151,7 +169,7 @@ class Encoder:
         num_attention_layers: int,
         dk: int,
         dv: int,
-        num_encoder: int
+        num_encoder: int = 6
     ):
         self.layers = [SingleEncoder(key, input_dim, hidden_dim, num_attention_layers, dk, dv) for _ in range(num_encoder)]
 
@@ -208,7 +226,7 @@ class Decoder:
         num_attention_layers: int,
         dk: int,
         dv: int,
-        num_decoder: int
+        num_decoder: int = 6
     ):
         self.layers = [SingleDecoder(key, input_dim, hidden_dim, num_attention_layers, dk, dv) for _ in range(num_decoder)]
 
@@ -227,15 +245,20 @@ class Transformer:
     def __init__(
         self,
         key: jax.Array,
+        num_vocab: int,
         input_dim: int,
         hidden_dim: int,
         num_attention_layers: int,
         dk: int,
         dv: int,
-        num_encoder: int,
-        num_decoder: int
+        max_seq_len: int = 5000,
+        num_encoder: int = 6,
+        num_decoder: int = 6
     ):
+        self.encode_preprocessor = Preprocessing(key, num_vocab, input_dim, max_seq_len)
         self.encoder = Encoder(key, input_dim, hidden_dim, num_attention_layers, dk, dv, num_encoder)
+
+        self.decode_preprocessor = Preprocessing(key, num_vocab, input_dim, max_seq_len)
         self.decoder = Decoder(key, input_dim, hidden_dim, num_attention_layers, dk, dv, num_decoder)
 
     def forward(self,
@@ -244,5 +267,8 @@ class Transformer:
         input_mask: jnp.ndarray = None,
         output_mask: jnp.ndarray = None
     ) -> jnp.ndarray:
-        encoding_mem = self.encoder.forward(input, input_mask)
-        return self.decoder.decode(output, encoding_mem, input_mask, output_mask)
+        preprocessed_input = self.encode_preprocessor.preprocess(input)
+        encoding_mem = self.encoder.encode(preprocessed_input, input_mask)
+
+        preprocessed_output = self.decode_preprocessor.preprocess(output)
+        return self.decoder.decode(preprocessed_output, encoding_mem, input_mask, output_mask)
