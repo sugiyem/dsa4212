@@ -193,21 +193,51 @@ class PeepholeLSTM(LSTM):
         return (c_t, o_t, h_t)
 
     @staticmethod
-    def forward_full(params: LSTMParams, x_in: jnp.ndarray) -> jnp.ndarray:
-        time_steps = x_in.shape[0]
-        h, o, c = jnp.zeros(shape=(params.hidden_dim,)), jnp.zeros(shape=(params.output_dim,)), \
-            jnp.zeros(shape=(params.hidden_dim,))
+    def forward_full(
+        params: LSTMParams, 
+        x_in: jnp.ndarray
+    ) -> jnp.ndarray:
+        time_steps = x_in.shape[1]
+        h, o, c = jnp.zeros(shape=(params.hidden_dim, 1)), jnp.zeros(shape=(params.output_dim, 1)), \
+            jnp.zeros(shape=(params.hidden_dim, 1))
         o_ls = []
         for i in range(time_steps):
             if len(x_in.shape) == 1:
                 c_t, o_t, h_t = LSTM.forward(params, x_in[i:i+1], h, c, params.wout)
             elif len(x_in.shape) == 2:
-                c_t, o_t, h_t = PeepholeLSTM.forward(x_in[:,i], h, c, params.wout)
+                c_t, o_t, h_t = LSTM.forward(params, x_in[:,i:i+1], h, c, params.wout)
             elif len(x_in.shape) == 3:
-                c_t, o_t, h_t = PeepholeLSTM.forward(x_in[:,i,:], h, c, params.wout)
+                c_t, o_t, h_t = LSTM.forward(params, x_in[:,i:i+1,:], h, c, params.wout) 
             o_ls.append(o_t)
             h, o, c = h_t, o_t, c_t
         return jnp.array(o_ls)
+
+    @staticmethod
+    def forward_batch(
+        params: LSTMParams,
+        x_batch: jnp.ndarray
+    ) -> jnp.ndarray:
+        forward_full_batch = jax.vmap(LSTM.forward_full, in_axes=(None, 0))
+        return jnp.squeeze(forward_full_batch(params, x_batch), axis=3)
+    
+    @staticmethod
+    def mse(
+        params: LSTMParams,
+        x_batch: jnp.ndarray,
+        y_batch: jnp.ndarray
+    ) -> tuple[jnp.ndarray, jnp.ndarray]:
+        batch_out = LSTM.forward_batch(params, x_batch)
+        return jnp.mean((batch_out - y_batch) ** 2)
+    
+    @staticmethod
+    def backward(
+        params: LSTMParams,
+        x_batch: jnp.ndarray,
+        y_batch: jnp.ndarray
+    ) -> tuple[jnp.ndarray, jnp.ndarray]:
+        mse_grad = jax.jacobian(LSTM.mse, argnums=(0,), allow_int=True)
+        cur_grad = mse_grad(params, x_batch, y_batch)
+        return cur_grad
 
 class LSTMModel:
     def init_params(
