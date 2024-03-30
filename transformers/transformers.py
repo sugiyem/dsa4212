@@ -6,21 +6,18 @@ from utils import InputParams, MultiHeadAttnParams, softmax, rng_unif, relu, bas
 class Attention:
     def __init__(
         self, 
-        key: jax.Array, 
-        input_dim: int,
-        num_attention_layers: int,
-        dk: int,
-        dv: int
+        seed: int,
+        model_dim: int,
+        num_att_layers: int,
+        dk: int, # key dimension
+        dv: int # value dimension
     ):
-        self.key = key 
-        self.input_dim = input_dim
-        self.num_attention_layers = num_attention_layers
-        self.dk = dk
-        self.dv = dv
-        self.wq = rng_unif(key=key, shape=(num_attention_layers, input_dim, dk))
-        self.wk = rng_unif(key=key, shape=(num_attention_layers, input_dim, dk))
-        self.wv = rng_unif(key=key, shape=(num_attention_layers, input_dim, dv))
-        self.wo = rng_unif(key=key, shape=(num_attention_layers * dv, input_dim)) # output_dim = input_dim
+        self.num_att_layers = num_att_layers
+        key = jax.random.PRNGKey(seed)
+        self.wq = rng_unif(key=key, shape=(num_att_layers, model_dim, dk))
+        self.wk = rng_unif(key=key, shape=(num_att_layers, model_dim, dk))
+        self.wv = rng_unif(key=key, shape=(num_att_layers, model_dim, dv))
+        self.wo = rng_unif(key=key, shape=(num_att_layers * dv, model_dim))
 
     @staticmethod
     @jax.jit
@@ -54,7 +51,7 @@ class Attention:
         # query, key, value, mask must all be a jnp.array of size (len_seq, dim_size)
         attentions = []
 
-        for i in range(self.num_attention_layers):
+        for i in range(self.num_att_layers):
             q_i = query @ self.wq[i]
             k_i = key @ self.wk[i]
             v_i = value @ self.wv[i]
@@ -73,12 +70,13 @@ class Attention:
 class FeedForwardNetwork:
     def __init__(
         self,
-        key: jax.Array,
-        input_dim: int,
+        seed: int,
+        model_dim: int,
         hidden_dim: int 
     ):
-        self.layer1_matrix = rng_unif(key=key, shape=(input_dim, hidden_dim))
-        self.layer2_matrix = rng_unif(key=key, shape=(hidden_dim, input_dim))
+        key = jax.random.PRNGKey(seed)
+        self.layer1_matrix = rng_unif(key=key, shape=(model_dim, hidden_dim))
+        self.layer2_matrix = rng_unif(key=key, shape=(hidden_dim, model_dim))
 
     def forward(self, x: jnp.ndarray) -> jnp.ndarray:
         y = x @ self.layer1_matrix
@@ -89,12 +87,13 @@ class FeedForwardNetwork:
 class Embedding:
     def __init__(
         self,
-        key: jax.Array,
+        seed: int,
         num_vocab: int,
         model_dim: int
     ):
         self.num_vocab = num_vocab 
         self.model_dim = model_dim
+        key=jax.random.PRNGKey(seed)
         self.embed_matrix = rng_unif(key=key, shape=(num_vocab, model_dim))
 
     def embed(self, x: jnp.ndarray) -> jnp.ndarray:
@@ -127,12 +126,12 @@ class PositionalEncoder:
 class Preprocessing:
     def __init__(
         self,
-        key: jax.Array,
+        seed: int,
         num_vocab: int,
         model_dim: int,
         max_seq_len: int = 5000
     ):
-        self.embedding = Embedding(key, num_vocab, model_dim)
+        self.embedding = Embedding(seed, num_vocab, model_dim)
         self.positional_encoder = PositionalEncoder(model_dim, max_seq_len)
 
     def preprocess(self, x: jnp.ndarray) -> jnp.ndarray:
@@ -144,15 +143,15 @@ class Preprocessing:
 class SingleEncoder:
     def __init__(
         self, 
-        key: jax.Array,
-        input_dim: int,
+        seed: int,
+        model_dim: int,
         hidden_dim: int,
         num_attention_layers: int,
         dk: int,
         dv: int
     ):
-        self.attention = Attention(key, input_dim, num_attention_layers, dk, dv)
-        self.network = FeedForwardNetwork(key, input_dim, hidden_dim)
+        self.attention = Attention(seed, model_dim, num_attention_layers, dk, dv)
+        self.network = FeedForwardNetwork(seed, model_dim, hidden_dim)
         
     def encode(self, x: jnp.ndarray, mask: jnp.ndarray = None) -> jnp.ndarray:
         # Use the multi head attention
@@ -170,7 +169,7 @@ class SingleEncoder:
 class Encoder:
     def __init__(
         self,
-        key: jax.Array,
+        seed: int,
         input_dim: int,
         hidden_dim: int,
         num_attention_layers: int,
@@ -178,7 +177,7 @@ class Encoder:
         dv: int,
         num_encoder: int = 6
     ):
-        self.layers = [SingleEncoder(key, input_dim, hidden_dim, num_attention_layers, dk, dv) for _ in range(num_encoder)]
+        self.layers = [SingleEncoder(seed, input_dim, hidden_dim, num_attention_layers, dk, dv) for _ in range(num_encoder)]
 
     def encode(self, x: jnp.ndarray, mask: jnp.ndarray = None) -> jnp.ndarray:
         y = x
@@ -190,16 +189,16 @@ class Encoder:
 class SingleDecoder:
     def __init__(
         self,
-        key: jax.Array,
-        input_dim: int,
+        seed: int,
+        model_dim: int,
         hidden_dim: int,
-        num_attention_layers: int,
+        num_att_layers: int,
         dk: int,
         dv: int
     ):
-        self.first_attention = Attention(key, input_dim, num_attention_layers, dk, dv)
-        self.second_attention = Attention(key, input_dim, num_attention_layers, dk, dv)
-        self.network = FeedForwardNetwork(key, input_dim, hidden_dim)
+        self.first_attention = Attention(seed, model_dim, num_att_layers, dk, dv)
+        self.second_attention = Attention(seed, model_dim, num_att_layers, dk, dv)
+        self.network = FeedForwardNetwork(seed, model_dim, hidden_dim)
 
     def decode(self,
         x: jnp.ndarray,
@@ -227,15 +226,15 @@ class SingleDecoder:
 class Decoder:
     def __init__(
         self,
-        key: jax.Array,
-        input_dim: int,
+        seed: int,
+        model_dim: int,
         hidden_dim: int,
-        num_attention_layers: int,
+        num_att_layers: int,
         dk: int,
         dv: int,
         num_decoder: int = 6
     ):
-        self.layers = [SingleDecoder(key, input_dim, hidden_dim, num_attention_layers, dk, dv) for _ in range(num_decoder)]
+        self.layers = [SingleDecoder(seed, model_dim, hidden_dim, num_att_layers, dk, dv) for _ in range(num_decoder)]
 
     def decode(self, 
         x: jnp.ndarray, 
@@ -251,9 +250,9 @@ class Decoder:
 class Transformer:
     def __init__(
         self,
-        key: jax.Array,
+        seed: int,
         num_vocab: int,
-        input_dim: int,
+        model_dim: int,
         hidden_dim: int,
         num_attention_layers: int,
         dk: int,
@@ -262,11 +261,11 @@ class Transformer:
         num_encoder: int = 6,
         num_decoder: int = 6
     ):
-        self.encode_preprocessor = Preprocessing(key, num_vocab, input_dim, max_seq_len)
-        self.encoder = Encoder(key, input_dim, hidden_dim, num_attention_layers, dk, dv, num_encoder)
+        self.encode_preprocessor = Preprocessing(seed, num_vocab, model_dim, max_seq_len)
+        self.encoder = Encoder(seed, model_dim, hidden_dim, num_attention_layers, dk, dv, num_encoder)
 
-        self.decode_preprocessor = Preprocessing(key, num_vocab, input_dim, max_seq_len)
-        self.decoder = Decoder(key, input_dim, hidden_dim, num_attention_layers, dk, dv, num_decoder)
+        self.decode_preprocessor = Preprocessing(seed, num_vocab, model_dim, max_seq_len)
+        self.decoder = Decoder(seed, model_dim, hidden_dim, num_attention_layers, dk, dv, num_decoder)
 
     def forward(self,
         input: jnp.ndarray,
