@@ -7,7 +7,7 @@ import numpy as np
 
 @jax.jit
 def norm(x):
-    return jnp.linalg.norm(x)
+    return jnp.sum(jnp.square(x))
 
 
 @jax.jit
@@ -68,8 +68,6 @@ class MatrixFactorizationRecommender:
         for step in range(self.steps):
             self.U -= self.lr * self.gradient(gd_loss, 1)(A, self.U, self.V)
             self.V -= self.lr * self.gradient(gd_loss, 2)(A, self.U, self.V)
-            if step % 10 == 0:
-                print(step)
 
     def sgd(self, A: np.ndarray):
         for step in range(self.steps):
@@ -171,14 +169,14 @@ class MatrixFactorizationRecommender:
         print(f"Final loss: {self.loss(A, self.U, self.V)}")
         del A
 
-    def predict_top_k(self, user_idx, k=3, prediction=None):
+    def predict_top_k(self, user_idx, k=3):
         """
         Given a user index and k, return top k recommended songs for the user.
         """
-        if prediction is None:
-            prediction = self.U @ self.V.T
+        if self.prediction is None:
+            self.prediction = self.U @ self.V.T
 
-        ratings = prediction[user_idx, :]
+        ratings = self.prediction[user_idx, :]
         ratings = [(i, ratings[i]) for i in range(len(ratings))]
         ratings.sort(key=lambda x: x[1], reverse=True)
         return [i[0] for i in ratings[:k]]

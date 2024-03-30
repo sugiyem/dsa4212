@@ -1,3 +1,8 @@
 (40000, 8) (2466, 7)
 
 Gradient Descent
+Initial loss: 1259930.1718445672
+Elapsed time = 25.025454998016357 seconds
+Final loss: nan
+{'TP': 0, 'FP': 2208, 'precision': 0.0}
+{'TP': 0, 'FP': 0, 'FN': 0, 'TN': 2466, 'precision': 0}
