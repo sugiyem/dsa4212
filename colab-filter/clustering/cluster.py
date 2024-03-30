@@ -17,9 +17,8 @@ def l2_norm(x):
 class BasicClusteringRecommender:
     # n_neighbor will specify the number of most similar user to find
     # n_recommendation will specify the number of recommended songs to output
-    def __init__(self, n_neighbor, n_recommendation=10):
+    def __init__(self, n_neighbor):
         self.n_neighbor = n_neighbor
-        self.n_recommendation = n_recommendation
         self.similar_user_dict = {}
 
     # data must be a pd.dataframe with at least 3 columns, userID songID and rating
@@ -53,7 +52,8 @@ class BasicClusteringRecommender:
 
             similarity_score = dot_product(userVector[currSongs], currRatings) / (userNorm * l2_norm(currRatings))
 
-            heapq.heappush(pq, (similarity_score, i))
+            if similarity_score > 0:
+                heapq.heappush(pq, (similarity_score, i))
             
             if len(pq) > self.n_neighbor:
                 heapq.heappop(pq)
@@ -83,7 +83,7 @@ class BasicClusteringRecommender:
             return round(sum / cnt)
     
     # given userID, find the recommendation for this user
-    def predict(self, userID):
+    def predict(self, userID, n_recommendation):
         userSongs, _ = self.get_songs_and_ratings(userID)
         similar_users = self.get_similar_users(userID)
         
@@ -99,15 +99,14 @@ class BasicClusteringRecommender:
         avg[userSongs] = 0
 
         # get the best rated song
-        return np.argsort(avg)[-self.n_recommendation:]
+        return np.lexsort((totalCnt, avg))[-1 : -n_recommendation - 1 : -1]
     
 # Implementation of recommender in chapter 7 + 8 of "Practical Recommender System"
 # The idea is to use minibatch K-means clustering to split the user to a number of clusters
 # Then, each time we want to predict something, we'll find n most similar user in the same cluster
 class KMeansRecommender():
-    def __init__(self, n_neighbor, n_recommendation=10, n_cluster=10, use_minibatch=True):
+    def __init__(self, n_neighbor, n_cluster=10, use_minibatch=True):
         self.n_neighbor = n_neighbor
-        self.n_recommendation = n_recommendation
         self.similar_user_dict = {}
         self.n_cluster = n_cluster
         self.use_minibatch = use_minibatch
@@ -146,8 +145,6 @@ class KMeansRecommender():
                 new_centroids[nearest_centroid_idx, currSongs] += currRatings
 
             centroids = new_centroids / nearest_centroid_cnt[:, np.newaxis]
-
-        # problem: in current implementation, most centroid will converge to [0, 0, ...., 0] due to sparsity of data
         
         # choose the nearest centroid for each user
         self.nearest_centroid = [-1 for _ in range(self.n_userID)]
@@ -182,7 +179,8 @@ class KMeansRecommender():
 
             similarity_score = dot_product(userVector[currSongs], currRatings) / (userNorm * l2_norm(currRatings))
 
-            heapq.heappush(pq, (similarity_score, i))
+            if similarity_score > 0:
+                heapq.heappush(pq, (similarity_score, i))
             
             if len(pq) > self.n_neighbor:
                 heapq.heappop(pq)
@@ -212,7 +210,7 @@ class KMeansRecommender():
             return round(sum / cnt)
     
     # given userID, find the recommendation for this user
-    def predict(self, userID):
+    def predict(self, userID, n_recommendation):
         userSongs, _ = self.get_songs_and_ratings(userID)
         similar_users = self.get_similar_users(userID)
         
@@ -228,4 +226,4 @@ class KMeansRecommender():
         avg[userSongs] = 0
 
         # get the best rated song
-        return np.argsort(avg)[-self.n_recommendation:]
+        return np.lexsort((totalCnt, avg))[-1 : -n_recommendation - 1 : -1]
