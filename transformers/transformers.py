@@ -4,7 +4,6 @@ import numpy as np
 from utils import InputParams, MultiHeadAttnParams, softmax, rng_unif, relu, basic_normalize
 
 class Attention:
-    @jax.jit 
     def __init__(
         self, 
         key: jax.Array, 
@@ -30,8 +29,8 @@ class Attention:
         key: jnp.ndarray,
         value: jnp.ndarray,
     ) -> jnp.ndarray:
-        dk = query.shape[0]
-        return softmax((query @ key.T)/jnp.sqrt(dk)) @ value
+        dk = query.shape[1]
+        return jax.nn.softmax((query @ key.T) / jnp.sqrt(dk)) @ value
 
     @jax.jit
     def calc_masked_attention(
@@ -40,12 +39,11 @@ class Attention:
         value: jnp.ndarray,
         mask: jnp.ndarray
     ) -> jnp.ndarray:
-        dk = query.shape[0]
+        dk = query.shape[1]
         scores = (query @ key.T) / jnp.sqrt(dk)
         masked_scores = jnp.where(mask == 0, -jnp.inf, scores)
-        return softmax(masked_scores) @ value
+        return jax.nn.softmax(masked_scores) @ value
     
-    @jax.jit
     def calc_multi_head_attention(
         self,
         query: jnp.ndarray,
@@ -53,18 +51,23 @@ class Attention:
         value: jnp.ndarray,
         mask: jnp.ndarray = None
     ) -> jnp.ndarray:
-        concat_attention = jnp.array([])
+        # query, key, value, mask must all be a jnp.array of size (len_seq, dim_size)
+        attentions = []
 
         for i in range(self.num_attention_layers):
             q_i = query @ self.wq[i]
             k_i = key @ self.wk[i]
             v_i = value @ self.wv[i]
 
+            # q_i and v_i must be a jnp.array of size (len_seq, dk)
+            # v_i must be a jnp.array of size (len_seq, dv)
+
             scaled_attention = self.calc_attention(q_i, k_i, v_i) if mask is None \
                 else Attention.calc_masked_attention(q_i, k_i, v_i, mask)
-            concat_attention = jnp.append(concat_attention, scaled_attention)
+            attentions.append(scaled_attention)
         
-        return concat_attention @ self.wo
+        concat_attention = jnp.concatenate(attentions, axis=1)
+        return concat_attention @ self.wo # the output is a jnp.array of size (len_seq, dim_size)
 
 # MLP with 1 hidden layer and ReLU as it's activation function
 class FeedForwardNetwork:
@@ -95,7 +98,8 @@ class Embedding:
         self.embed_matrix = rng_unif(key=key, shape=(num_vocab, model_dim))
 
     def embed(self, x: jnp.ndarray) -> jnp.ndarray:
-        return self.embed_matrix[x] * jnp.sqrt(self.model_dim)
+        # input x is a jnp.array of size seq_len
+        return self.embed_matrix[x] * jnp.sqrt(self.model_dim) # output is a jnp.array of size (seq_len, model_dim)
     
 class PositionalEncoder:
     def __init__(
@@ -103,17 +107,20 @@ class PositionalEncoder:
         model_dim: int,
         max_seq_len: int = 5000
     ):
+        assert model_dim % 2 == 0, "model dimension must be even"
         position = np.arange(max_seq_len)[:, np.newaxis]
         div_term = np.exp(np.arange(0, model_dim, 2) * -(np.log(10000.0) / model_dim))
         
         self.position_encoding = np.zeros((max_seq_len, model_dim))
         self.position_encoding[:, 0::2] = np.sin(position * div_term)
         self.position_encoding[:, 1::2] = np.cos(position * div_term)
-        self.position_encoding = jnp.array(self.position_encoding[np.newaxis, :])
+        self.position_encoding = jnp.array(self.position_encoding)
+        
 
     def encode(self, x: jnp.ndarray) -> jnp.ndarray:
-        seq_len = x.shape[1]
-        return x + self.position_encoding[:, :seq_len]
+        # input x is a jnp.array of size (seq_len, model_dim)
+        seq_len = x.shape[0]
+        return x + self.position_encoding[:seq_len, :] # output will still retain the dimension (seq_len, model_dim)
 
 # Represents the whole pre-processing step before the real encoding steps in
 # Embeddding + Positional Encoding
@@ -211,7 +218,7 @@ class SingleDecoder:
         att_val2 = basic_normalize(att_val1 + att_val2)
 
         # Use the feed forward NN
-        y = self.network.forward(y)
+        y = self.network.forward(att_val2)
         # Add + normalize
         y = basic_normalize(att_val2 + y)
 

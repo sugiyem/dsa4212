@@ -16,7 +16,6 @@ class MultiHeadAttnParams(NamedTuple):
     w_full: list[SingleHeadAttnParams]
     wo: jnp.ndarray
 
-@jax.jit
 def rng_unif(key: jax.Array, shape) -> jnp.ndarray:
     return jax.random.uniform(key=key, shape=shape)
 
