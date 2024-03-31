@@ -170,8 +170,8 @@ class MatrixFactorizationRecommender:
 
         # U = user embedding matrix of size (user_num, d)
         # V = item embedding matrix of size (item_num, d)
-        self.U = np.random.normal(0, 1, size=(user_num, self.d))
-        self.V = np.random.normal(0, 1, size=(item_num, self.d))
+        self.U = np.random.normal(0, 1 / np.sqrt(self.d), size=(user_num, self.d))
+        self.V = np.random.normal(0, 1 / np.sqrt(self.d), size=(item_num, self.d))
 
         print(f"Initial loss: {self.loss(A, self.U, self.V)}")
         start_time = time()
