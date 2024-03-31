@@ -47,6 +47,9 @@ class MatrixFactorizationRecommender:
         self.prediction = None
 
     def loss(self, A: np.ndarray, U: np.ndarray, V: np.ndarray):
+        """
+        Objective loss function we want to optimize.
+        """
         n, m = A.shape
         w = U @ V.T
         loss = 0
@@ -60,6 +63,10 @@ class MatrixFactorizationRecommender:
         return jax.jit(jax.grad(fun, argnums=argnums))
 
     def gd(self, A: np.ndarray):
+        """
+        Implementation of Gradient Descent using JAX gradient.
+        """
+
         def gd_loss(A, U, V):
             return _loss(A, U, V, self.w0)
 
@@ -70,6 +77,9 @@ class MatrixFactorizationRecommender:
             self.V -= self.lr * self.gradient(gd_loss, 2)(A, self.U, self.V)
 
     def sgd(self, A: np.ndarray):
+        """
+        Implementation of Mini Batch Stochastic Gradient Descent.
+        """
         for step in range(self.steps):
             uu = np.random.choice(A.shape[0], (self.batch_size,))
             ii = np.random.choice(A.shape[1], (self.batch_size,))
@@ -84,6 +94,10 @@ class MatrixFactorizationRecommender:
                 ) / self.d
 
     def svd(self, A: np.ndarray):
+        """
+        Implementation of Singular Value Decomposition as initial embeddings then
+        optimize using SGD.
+        """
         u, sigma, vt = np.linalg.svd(A)
         if self.k != -1:
             u = u[:, : self.k]
@@ -110,6 +124,9 @@ class MatrixFactorizationRecommender:
                 ) / self.d
 
     def als(self, A: np.ndarray):
+        """
+        Implementation of Alternating Least Squares using np.linalg.inv().
+        """
         for step in range(self.steps):
             # fix V
             self.U = (
@@ -125,6 +142,9 @@ class MatrixFactorizationRecommender:
             )
 
     def als_solve(self, A: np.ndarray):
+        """
+        Implementation of Alternating Least Squares using np.solve().
+        """
         for step in range(self.steps):
             # fix V
             self.U = np.linalg.solve(
@@ -136,6 +156,9 @@ class MatrixFactorizationRecommender:
             ).T
 
     def fit(self, train_data):
+        """
+        Fit the model by learning from given training data.
+        """
         user_num = max(train_data["user_id_idx"]) + 1
         item_num = max(train_data["item_id_idx"]) + 1
 
@@ -210,7 +233,20 @@ class MatrixFactorizationRecommender:
                     TP += 1
                 else:
                     FP += 1
-        return {"TP": TP, "FP": FP, "precision": TP / (TP + FP) if TP + FP > 0 else 0}
+
+        precision = TP / (TP + FP) if TP + FP > 0 else 0
+        recall = TP / test_data.shape[0] if test_data.shape[0] > 0 else 0
+        return {
+            "TP": TP,
+            "FP": FP,
+            "precision": precision,
+            "recall": recall,
+            "F1": (
+                2 * precision * recall / (precision + recall)
+                if precision + recall > 0
+                else 0
+            ),
+        }
 
     def evaluate(self, test_data):
         """
@@ -240,10 +276,18 @@ class MatrixFactorizationRecommender:
             else:
                 TN += 1
 
+        precision = TP / (TP + FP) if TP + FP > 0 else 0
+        recall = TP / (TP + FN) if TP + FN > 0 else 0
         return {
             "TP": TP,
             "FP": FP,
             "FN": FN,
             "TN": TN,
-            "precision": TP / (TP + FP) if TP + FP > 0 else 0,
+            "precision": precision,
+            "recall": recall,
+            "F1": (
+                2 * precision * recall / (precision + recall)
+                if precision + recall > 0
+                else 0
+            ),
         }
