@@ -23,8 +23,8 @@ class MatrixFactorizationRecommender:
         d=10,
         w0=0.1,
         lr=0.001,
-        model="gd",
-        steps=100,
+        model="als_solve",
+        steps=50000,
         batch_size=200,
         k=10,
     ) -> None:

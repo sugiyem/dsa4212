@@ -1,8 +1,31 @@
 (40000, 8) (2466, 7)
 
 Gradient Descent
-Initial loss: 1259930.1718445672
-Elapsed time = 25.025454998016357 seconds
+Initial loss: 852998.2679191576
+Elapsed time = 2931.6276507377625 seconds
 Final loss: nan
-{'TP': 0, 'FP': 2208, 'precision': 0.0}
-{'TP': 0, 'FP': 0, 'FN': 0, 'TN': 2466, 'precision': 0}
+{'TP': 10, 'FP': 2198, 'precision': 0.004528985507246377, 'recall': 0.0040551500405515, 'F1': 0.004278990158322636}
+
+Stochastic Gradient Descent
+Initial loss: 853932.6231536294
+Elapsed time = 15.761559963226318 seconds
+Final loss: 853729.8548450395
+{'TP': 1, 'FP': 2207, 'precision': 0.0004528985507246377, 'recall': 0.00040551500405515005, 'F1': 0.00042789901583226354}
+
+Singular Value Decomposition
+Initial loss: 853553.2298921095
+Elapsed time = 382.2379882335663 seconds
+Final loss: 831857.3845409907
+{'TP': 15, 'FP': 2193, 'precision': 0.006793478260869565, 'recall': 0.006082725060827251, 'F1': 0.006418485237483954}
+
+Alternating Least Squares
+Initial loss: 854744.3858173286
+Elapsed time = 2319.3882689476013 seconds
+Final loss: 830808.5718841053
+{'TP': 15, 'FP': 2193, 'precision': 0.006793478260869565, 'recall': 0.006082725060827251, 'F1': 0.006418485237483954}
+
+Alternating Least Squares (np.solve)
+Initial loss: 854385.4453337063
+Elapsed time = 2070.1975507736206 seconds
+Final loss: 830808.5718841053
+{'TP': 15, 'FP': 2193, 'precision': 0.006793478260869565, 'recall': 0.006082725060827251, 'F1': 0.006418485237483954}
