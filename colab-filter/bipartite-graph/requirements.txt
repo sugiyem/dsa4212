@@ -1,0 +1,10 @@
+# Exact versions will be specified in the future for reproducibility
+
+torch-scatter==2.1.2
+torch-sparse==0.6.18
+git+https://github.com/pyg-team/pytorch_geometric.git
+tqdm
+pandas
+numpy
+scikit-learn
+pyspark==3.5.1
