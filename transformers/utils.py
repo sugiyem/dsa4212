@@ -117,3 +117,25 @@ def train_model(state: train_state.TrainState, data_generator: callable, num_epo
             state = train_step(state, train_batch)
 
     return state
+
+# the decode doesn't use any masking currently
+# need to fix this later
+def decode(
+    state: train_state.TrainState, 
+    input: jnp.ndarray, # must be of size (num_test_case, input_seq_len)
+    output_init: jnp.ndarray, # must be of size (num_test_case, 1)
+    output_len: int
+) -> jnp.ndarray:
+    curr_output = output_init
+    for _ in range(output_len - 1):
+        print(curr_output)
+        logits = state.apply_fn({'params': state.params}, input, curr_output, None, None)
+        
+        # only consider output for last sequence
+        last_logits = logits[:, -1, :]
+        # greedy decoding: pick the word with largest probability
+        next_word = jnp.argmax(last_logits, axis=1)
+
+        curr_output = jnp.hstack((curr_output, next_word.reshape(-1, 1)))
+    
+    return curr_output
