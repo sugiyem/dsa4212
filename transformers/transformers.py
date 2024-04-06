@@ -1,23 +1,21 @@
 import jax
 import jax.numpy as jnp
 import numpy as np
+from flax import linen as nn #Linen API
 from utils import InputParams, MultiHeadAttnParams, softmax, rng_unif, relu, basic_normalize
 
-class Attention:
-    def __init__(
-        self, 
-        seed: int,
-        model_dim: int,
-        num_att_layers: int,
-        dk: int, # key dimension
-        dv: int # value dimension
-    ):
-        self.num_att_layers = num_att_layers
-        key = jax.random.PRNGKey(seed)
-        self.wq = rng_unif(key=key, shape=(num_att_layers, model_dim, dk))
-        self.wk = rng_unif(key=key, shape=(num_att_layers, model_dim, dk))
-        self.wv = rng_unif(key=key, shape=(num_att_layers, model_dim, dv))
-        self.wo = rng_unif(key=key, shape=(num_att_layers * dv, model_dim))
+class Attention(nn.Module):
+    model_dim: int 
+    num_attention_layer: int 
+
+    def setup(self):
+        assert self.model_dim % self.num_attention_layer == 0, "model dimension must be divisible by number of layers"
+
+        self.attention_dim = self.model_dim // self.num_attention_layer # key, query and value dimension
+        self.wq = nn.Dense(self.model_dim)
+        self.wk = nn.Dense(self.model_dim)
+        self.wv = nn.Dense(self.model_dim)
+        self.wo = nn.Dense(self.model_dim)
 
     @staticmethod
     @jax.jit
@@ -26,8 +24,9 @@ class Attention:
         key: jnp.ndarray,
         value: jnp.ndarray,
     ) -> jnp.ndarray:
-        dk = query.shape[1]
-        return jax.nn.softmax((query @ key.T) / jnp.sqrt(dk)) @ value
+        dk = query.shape[-1]
+        scores = jnp.matmul(query, key.transpose(0,1,3,2)) / jnp.sqrt(dk)
+        return nn.softmax(scores) @ value
 
     @jax.jit
     def calc_masked_attention(
@@ -36,245 +35,239 @@ class Attention:
         value: jnp.ndarray,
         mask: jnp.ndarray
     ) -> jnp.ndarray:
-        dk = query.shape[1]
-        scores = (query @ key.T) / jnp.sqrt(dk)
+        dk = query.shape[-1]
+        scores = jnp.matmul(query, key.transpose(0,1,3,2)) / jnp.sqrt(dk)
         masked_scores = jnp.where(mask == 0, -jnp.inf, scores)
-        return jax.nn.softmax(masked_scores) @ value
+        return nn.softmax(masked_scores) @ value
     
-    def calc_multi_head_attention(
+    def __call__(
         self,
         query: jnp.ndarray,
         key: jnp.ndarray,
         value: jnp.ndarray,
-        mask: jnp.ndarray = None
+        mask: jnp.ndarray = None    
     ) -> jnp.ndarray:
-        # query, key, value, mask must all be a jnp.array of size (len_seq, dim_size)
-        attentions = []
+        # query, key, value, mask must all be a jnp.array of size (num_data, len_seq, dim_size)
+        # it's okay for len_seq to be different during decoding process
+        num_data = query.shape[0]
 
-        for i in range(self.num_att_layers):
-            q_i = query @ self.wq[i]
-            k_i = key @ self.wk[i]
-            v_i = value @ self.wv[i]
+        # All these transformed fields will be a jnp.ndarray of size (num_data, num_att_ayer, len_seq, att_dim)
+        transformed_query = self.wq(query).reshape(num_data, -1, self.num_attention_layer, self.attention_dim).transpose(0,2,1,3)
+        transformed_key = self.wk(key).reshape(num_data, -1, self.num_attention_layer, self.attention_dim).transpose(0,2,1,3)
+        transformed_value = self.wv(value).reshape(num_data, -1, self.num_attention_layer, self.attention_dim).transpose(0,2,1,3)
 
-            # q_i and v_i must be a jnp.array of size (len_seq, dk)
-            # v_i must be a jnp.array of size (len_seq, dv)
-
-            scaled_attention = self.calc_attention(q_i, k_i, v_i) if mask is None \
-                else Attention.calc_masked_attention(q_i, k_i, v_i, mask)
-            attentions.append(scaled_attention)
+        attention = self.calc_attention(transformed_query, transformed_key, transformed_value) if mask is None \
+            else self.calc_masked_attention(transformed_query, transformed_key, transformed_value, mask)
         
-        concat_attention = jnp.concatenate(attentions, axis=1)
-        return concat_attention @ self.wo # the output is a jnp.array of size (len_seq, dim_size)
+        # Transform the shape of attention to (num_data, len_seq, dim_size)
+        attention = attention.transpose(0,2,1,3).reshape(num_data, -1, self.model_dim)
+        
+        return self.wo(attention) # the output is a jnp.array of size (num_data, len_seq, dim_size)
 
 # MLP with 1 hidden layer and ReLU as it's activation function
-class FeedForwardNetwork:
-    def __init__(
-        self,
-        seed: int,
-        model_dim: int,
-        hidden_dim: int 
-    ):
-        key = jax.random.PRNGKey(seed)
-        self.layer1_matrix = rng_unif(key=key, shape=(model_dim, hidden_dim))
-        self.layer2_matrix = rng_unif(key=key, shape=(hidden_dim, model_dim))
+class FeedForwardNetwork(nn.Module):
+    model_dim: int 
+    feedforward_dim: int
 
-    def forward(self, x: jnp.ndarray) -> jnp.ndarray:
-        y = x @ self.layer1_matrix
-        y = relu(y)
-        y = y @ self.layer2_matrix 
-        return y
+    def setup(self):
+        self.dense1 = nn.Dense(features=self.feedforward_dim)
+        self.dense2 = nn.Dense(features=self.model_dim)
 
-class Embedding:
-    def __init__(
-        self,
-        seed: int,
-        num_vocab: int,
-        model_dim: int
-    ):
-        self.num_vocab = num_vocab 
-        self.model_dim = model_dim
-        key=jax.random.PRNGKey(seed)
-        self.embed_matrix = rng_unif(key=key, shape=(num_vocab, model_dim))
+    def __call__(self, x):
+        x = self.dense1(x)
+        x = nn.relu(x)
+        x = self.dense2(x)
+        return x
 
-    def embed(self, x: jnp.ndarray) -> jnp.ndarray:
-        # input x is a jnp.array of size seq_len
-        return self.embed_matrix[x] * jnp.sqrt(self.model_dim) # output is a jnp.array of size (seq_len, model_dim)
-    
-class PositionalEncoder:
-    def __init__(
-        self,
-        model_dim: int,
-        max_seq_len: int = 5000
-    ):
-        assert model_dim % 2 == 0, "model dimension must be even"
-        position = np.arange(max_seq_len)[:, np.newaxis]
-        div_term = np.exp(np.arange(0, model_dim, 2) * -(np.log(10000.0) / model_dim))
+class Embedding(nn.Module):
+    num_vocab: int 
+    model_dim: int
+
+    def setup(self):
+        self.embed = nn.Embed(num_embeddings=self.num_vocab, features=self.model_dim)
+
+    def __call__(self, x: jnp.ndarray) -> jnp.ndarray:
+        # input x is a jnp.ndarray of size (num_data, seq_len)
+        # will output a jnp.ndarray of size (num_data, seq_len, model_dim)
+        return self.embed(x) * jnp.sqrt(self.model_dim)
+
+class PositionalEncoder(nn.Module):
+    model_dim: int 
+    max_seq_len: int = 5000
+
+    def setup(self):
+        assert self.model_dim % 2 == 0, "model dimension must be even"
+
+        position = np.arange(self.max_seq_len)[:, np.newaxis]
+        div_term = np.exp(np.arange(0, self.model_dim, 2) * -(np.log(10000.0) / self.model_dim))
         
-        self.position_encoding = np.zeros((max_seq_len, model_dim))
+        self.position_encoding = np.zeros((self.max_seq_len, self.model_dim))
         self.position_encoding[:, 0::2] = np.sin(position * div_term)
         self.position_encoding[:, 1::2] = np.cos(position * div_term)
         self.position_encoding = jnp.array(self.position_encoding)
-        
 
-    def encode(self, x: jnp.ndarray) -> jnp.ndarray:
-        # input x is a jnp.array of size (seq_len, model_dim)
-        seq_len = x.shape[0]
-        return x + self.position_encoding[:seq_len, :] # output will still retain the dimension (seq_len, model_dim)
+    def __call__(self, x: jnp.ndarray) -> jnp.ndarray:
+        # input x is a jnp.ndarray of size (num_data, seq_len, model_dim)
+        # will output a jnp.ndarray of size (num_data, seq_len, model_dim)
+        seq_len = x.shape[1]
+        return x + self.position_encoding[:seq_len, :] 
+        
 
 # Represents the whole pre-processing step before the real encoding steps in
 # Embeddding + Positional Encoding
-class Preprocessing:
-    def __init__(
-        self,
-        seed: int,
-        num_vocab: int,
-        model_dim: int,
-        max_seq_len: int = 5000
-    ):
-        self.embedding = Embedding(seed, num_vocab, model_dim)
-        self.positional_encoder = PositionalEncoder(model_dim, max_seq_len)
+class Preprocessing(nn.Module):
+    num_vocab: int 
+    model_dim: int 
+    max_seq_len: int = 5000
 
-    def preprocess(self, x: jnp.ndarray) -> jnp.ndarray:
-        y = self.embedding.embed(x)
-        y = self.positional_encoder.encode(y)
-        return y
+    def setup(self):
+        self.embedding = Embedding(self.num_vocab, self.model_dim)
+        self.positional_encoder = PositionalEncoder(self.model_dim, self.max_seq_len)
+
+    def __call__(self, x: jnp.ndarray) -> jnp.ndarray:
+        x = self.embedding(x)
+        x = self.positional_encoder(x)
+        return x
     
 # Single encoder will have one multi-head attention and one feed forward NN
-class SingleEncoder:
-    def __init__(
-        self, 
-        seed: int,
-        model_dim: int,
-        hidden_dim: int,
-        num_attention_layers: int,
-        dk: int,
-        dv: int
-    ):
-        self.attention = Attention(seed, model_dim, num_attention_layers, dk, dv)
-        self.network = FeedForwardNetwork(seed, model_dim, hidden_dim)
+class SingleEncoder(nn.Module):
+    model_dim: int 
+    feedforward_dim: int
+    num_attention_layer: int 
+
+    def setup(self):
+        self.attention = Attention(self.model_dim, self.num_attention_layer)
+        self.network = FeedForwardNetwork(self.model_dim, self.feedforward_dim)
+        self.normalizer1 = nn.LayerNorm()
+        self.normalizer2 = nn.LayerNorm()
         
-    def encode(self, x: jnp.ndarray, mask: jnp.ndarray = None) -> jnp.ndarray:
+    def __call__(self, x: jnp.ndarray, mask: jnp.ndarray = None) -> jnp.ndarray:
         # Use the multi head attention
-        att_val = self.attention.calc_multi_head_attention(x, x, x, mask)
-        # Add + normalizate
-        att_val = basic_normalize(x + att_val)
+        att_val = self.attention(x, x, x, mask) 
+        # Normalize
+        x = self.normalizer1(x + att_val)
 
         # Use the feed forward NN
-        y = self.network.forward(att_val)
-        # Add + normalize
-        y = basic_normalize(att_val + y)
+        net_val = self.network(x)
+        # Normalize again
+        x = self.normalizer2(x + net_val)
 
-        return y
+        return x
     
-class Encoder:
-    def __init__(
-        self,
-        seed: int,
-        input_dim: int,
-        hidden_dim: int,
-        num_attention_layers: int,
-        dk: int,
-        dv: int,
-        num_encoder: int = 6
-    ):
-        self.layers = [SingleEncoder(seed, input_dim, hidden_dim, num_attention_layers, dk, dv) for _ in range(num_encoder)]
+class Encoder(nn.Module):
+    model_dim: int 
+    feedforward_dim: int 
+    num_attention_layer: int 
+    num_encoder: int = 6
 
-    def encode(self, x: jnp.ndarray, mask: jnp.ndarray = None) -> jnp.ndarray:
-        y = x
+    def setup(self):
+        self.layers = [SingleEncoder(self.model_dim, self.feedforward_dim, self.num_attention_layer) \
+                       for _ in range(self.num_encoder)]
+        
+    def __call__(self, x: jnp.ndarray, mask: jnp.ndarray = None) -> jnp.ndarray:
         for layer in self.layers:
-            y = layer.encode(y, mask)
-        return y
+            x = layer(x, mask)
+        return x
+
 
 # Single decoder will have two multi-head attentions and one feed forward NN
-class SingleDecoder:
-    def __init__(
-        self,
-        seed: int,
-        model_dim: int,
-        hidden_dim: int,
-        num_att_layers: int,
-        dk: int,
-        dv: int
-    ):
-        self.first_attention = Attention(seed, model_dim, num_att_layers, dk, dv)
-        self.second_attention = Attention(seed, model_dim, num_att_layers, dk, dv)
-        self.network = FeedForwardNetwork(seed, model_dim, hidden_dim)
+class SingleDecoder(nn.Module):
+    model_dim: int
+    feedforward_dim: int 
+    num_attention_layer: int 
 
-    def decode(self,
+    def setup(self):
+        self.attention1 = Attention(self.model_dim, self.num_attention_layer)
+        self.attention2 = Attention(self.model_dim, self.num_attention_layer)
+        self.network = FeedForwardNetwork(self.model_dim, self.feedforward_dim)
+        self.normalizer1 = nn.LayerNorm()
+        self.normalizer2 = nn.LayerNorm()
+        self.normalizer3 = nn.LayerNorm()
+
+    def __call__(self,
         x: jnp.ndarray,
         encoding_mem: jnp.ndarray, # memory during encoding process
         mask1: jnp.ndarray = None,
         mask2: jnp.ndarray = None
     ) -> jnp.ndarray:
         # Use the first multi-head attention
-        att_val1 = self.first_attention.calc_multi_head_attention(x, x, x, mask1)
-        # Add + normalize
-        att_val1 = basic_normalize(x + att_val1)
+        att_val1 = self.attention1(x, x, x, mask1)
+        # Normalize
+        x = self.normalizer1(x + att_val1)
 
         # Use the second multi-head attention
-        att_val2 = self.second_attention.calc_multi_head_attention(att_val1, encoding_mem, encoding_mem, mask2)
-        # Add + normalize
-        att_val2 = basic_normalize(att_val1 + att_val2)
+        att_val2 = self.attention2(x, encoding_mem, encoding_mem, mask2)
+        # Normalize
+        x = self.normalizer2(x + att_val2)
 
         # Use the feed forward NN
-        y = self.network.forward(att_val2)
-        # Add + normalize
-        y = basic_normalize(att_val2 + y)
+        net_val = self.network(x)
+        # Normalize
+        x = self.normalizer3(x + net_val)
 
-        return y
+        return x
+        
 
-class Decoder:
-    def __init__(
-        self,
-        seed: int,
-        model_dim: int,
-        hidden_dim: int,
-        num_att_layers: int,
-        dk: int,
-        dv: int,
-        num_decoder: int = 6
-    ):
-        self.layers = [SingleDecoder(seed, model_dim, hidden_dim, num_att_layers, dk, dv) for _ in range(num_decoder)]
+class Decoder(nn.Module):
+    model_dim: int 
+    feedforward_dim: int 
+    num_attention_layer: int 
+    num_decoder: int = 6
 
-    def decode(self, 
-        x: jnp.ndarray, 
+    def setup(self):
+        self.layers = [SingleDecoder(self.model_dim, self.feedforward_dim, self.num_attention_layer) \
+                       for _ in range(self.num_decoder)]
+    def __call__(self,
+        x: jnp.ndarray,
         encoding_mem: jnp.ndarray,
         mask1: jnp.ndarray = None,
         mask2: jnp.ndarray = None
     ) -> jnp.ndarray:
-        y = x
         for layer in self.layers:
-            y = layer.decode(y, encoding_mem, mask1, mask2)
-        return y
+            x = layer(x, encoding_mem, mask1, mask2)
+        return x
     
-class Transformer:
-    def __init__(
-        self,
-        seed: int,
-        num_vocab: int,
-        model_dim: int,
-        hidden_dim: int,
-        num_attention_layers: int,
-        dk: int,
-        dv: int,
-        max_seq_len: int = 5000,
-        num_encoder: int = 6,
-        num_decoder: int = 6
-    ):
-        self.encode_preprocessor = Preprocessing(seed, num_vocab, model_dim, max_seq_len)
-        self.encoder = Encoder(seed, model_dim, hidden_dim, num_attention_layers, dk, dv, num_encoder)
+class LogitsGenerator(nn.Module):
+    num_vocab: int 
 
-        self.decode_preprocessor = Preprocessing(seed, num_vocab, model_dim, max_seq_len)
-        self.decoder = Decoder(seed, model_dim, hidden_dim, num_attention_layers, dk, dv, num_decoder)
+    def setup(self):
+        self.dense = nn.Dense(features=self.num_vocab)
 
-    def forward(self,
+    def __call__(self, x: jnp.ndarray) -> jnp.ndarray:
+        x = self.dense(x)
+        return nn.log_softmax(x)
+    
+class Transformer(nn.Module):
+    input_vocab: int
+    output_vocab: int 
+    model_dim: int 
+    feedforward_dim: int 
+    num_attention_layer: int 
+    max_seq_len: int = 5000
+    num_coder: int = 6
+
+    def setup(self):
+        self.encode_preprocessor = Preprocessing(self.input_vocab, self.model_dim, self.max_seq_len)
+        self.encoder = Encoder(self.model_dim, self.feedforward_dim, self.num_attention_layer, self.num_coder)
+        
+        self.decode_preprocessor = Preprocessing(self.output_vocab, self.model_dim, self.max_seq_len)
+        self.decoder = Decoder(self.model_dim, self.feedforward_dim, self.num_attention_layer, self.num_coder)
+        
+        self.generator = LogitsGenerator(self.output_vocab)
+    
+    def __call__(self,
         input: jnp.ndarray,
         output: jnp.ndarray,
         input_mask: jnp.ndarray = None,
         output_mask: jnp.ndarray = None
-    ) -> jnp.ndarray:
-        preprocessed_input = self.encode_preprocessor.preprocess(input)
-        encoding_mem = self.encoder.encode(preprocessed_input, input_mask)
+    ) -> tuple[jnp.ndarray, jnp.ndarray]:
+        # input is a jnp.ndarray of size (num_data, input_dim)
+        # output is a jnp.ndarray of size (num_data, output_dim)
+        preprocessed_input = self.encode_preprocessor(input)
+        encoding_mem = self.encoder(preprocessed_input, input_mask)
 
-        preprocessed_output = self.decode_preprocessor.preprocess(output)
-        return self.decoder.decode(preprocessed_output, encoding_mem, input_mask, output_mask)
+        preprocessed_output = self.decode_preprocessor(output)
+        out = self.decoder(preprocessed_output, encoding_mem, input_mask, output_mask)
+        logits = self.generator(out)
+        
+        return logits
