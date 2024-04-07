@@ -28,6 +28,7 @@ class Attention(nn.Module):
         scores = jnp.matmul(query, key.transpose(0,1,3,2)) / jnp.sqrt(dk)
         return nn.softmax(scores) @ value
 
+    @staticmethod 
     @jax.jit
     def calc_masked_attention(
         query: jnp.ndarray,
@@ -37,7 +38,7 @@ class Attention(nn.Module):
     ) -> jnp.ndarray:
         dk = query.shape[-1]
         scores = jnp.matmul(query, key.transpose(0,1,3,2)) / jnp.sqrt(dk)
-        masked_scores = jnp.where(mask == 0, -jnp.inf, scores)
+        masked_scores = jnp.where(mask == 0, -1e9, scores)
         return nn.softmax(masked_scores) @ value
     
     def __call__(
@@ -47,9 +48,14 @@ class Attention(nn.Module):
         value: jnp.ndarray,
         mask: jnp.ndarray = None    
     ) -> jnp.ndarray:
-        # query, key, value, mask must all be a jnp.array of size (num_data, len_seq, dim_size)
+        # query, key, value must all be a jnp.array of size (num_data, len_seq, dim_size)
+        # if mask is not None, it is a 3D jnp.array of size (num_data, d1, d2) for some d1, d2
         # it's okay for len_seq to be different during decoding process
         num_data = query.shape[0]
+
+        # convert mask to 4D array
+        if mask is not None:
+            mask = mask.reshape(mask.shape[0], 1, mask.shape[1], mask.shape[2])
 
         # All these transformed fields will be a jnp.ndarray of size (num_data, num_att_ayer, len_seq, att_dim)
         transformed_query = self.wq(query).reshape(num_data, -1, self.num_attention_layer, self.attention_dim).transpose(0,2,1,3)
@@ -61,7 +67,6 @@ class Attention(nn.Module):
         
         # Transform the shape of attention to (num_data, len_seq, dim_size)
         attention = attention.transpose(0,2,1,3).reshape(num_data, -1, self.model_dim)
-        
         return self.wo(attention) # the output is a jnp.array of size (num_data, len_seq, dim_size)
 
 # MLP with 1 hidden layer and ReLU as it's activation function
@@ -265,9 +270,8 @@ class Transformer(nn.Module):
         # output is a jnp.ndarray of size (num_data, output_dim)
         preprocessed_input = self.encode_preprocessor(input)
         encoding_mem = self.encoder(preprocessed_input, input_mask)
-
         preprocessed_output = self.decode_preprocessor(output)
-        out = self.decoder(preprocessed_output, encoding_mem, input_mask, output_mask)
+        out = self.decoder(preprocessed_output, encoding_mem, output_mask, input_mask)
         logits = self.generator(out)
         
         return logits

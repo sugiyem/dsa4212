@@ -43,60 +43,48 @@ def relu(x: jnp.ndarray) -> jnp.ndarray:
 def basic_normalize(x: jnp.ndarray) -> jnp.ndarray:
     return (x - jnp.mean(x)) / (jnp.std(x) + 1e-6)
 
+# create a mask of shape (1, size, size)
+def generate_mask(size: int) -> jnp.ndarray:
+    mask = jnp.triu(jnp.ones((1, size, size), dtype=int), k=1)
+    return mask == 0
+
 class Batch:
     "Object for holding a batch of data with mask during training."
     "Source: https://nlp.seas.harvard.edu/2018/04/03/attention.html"
 
     def __init__(self, 
-        src: jnp.ndarray, 
-        tgt: jnp.ndarray, 
+        src: jnp.ndarray, # must be a 2D jnp.ndarray
+        tgt: jnp.ndarray, # must be a 2D jnp.ndarray
         pad: int = 0
     ):
         self.src = src 
-        self.src_mask = None 
-        self.tgt = tgt[:, :-1] # pad the target
+        self.src_mask = (src != pad).reshape(src.shape[0], 1, src.shape[1])
+        self.tgt = tgt[:, :-1]
         self.tgt_final = tgt[:, 1:]
-        self.tgt_mask = None
-
-        # Need to fix the masking later
-        '''
-        self.src = src
-        self.src_mask = (src != pad).unsqueeze(-2)
-        if trg is not None:
-            self.trg = trg[:, :-1]
-            self.trg_y = trg[:, 1:]
-            self.trg_mask = \
-                self.make_std_mask(self.trg, pad)
-            self.ntokens = (self.trg_y != pad).data.sum()
-
-        '''
+        self.tgt_mask = self.make_std_mask(self.tgt, pad)
     
     @staticmethod
-    def make_std_mask(tgt, pad):
+    def make_std_mask(tgt: jnp.ndarray, pad: jnp.ndarray) -> jnp.ndarray:
         "Create a mask to hide padding and future words."
-        '''
-        tgt_mask = (tgt != pad).unsqueeze(-2)
-        tgt_mask = tgt_mask & Variable(
-            subsequent_mask(tgt.size(-1)).type_as(tgt_mask.data))
+        dim_x, dim_y = tgt.shape
+        tgt_mask = (tgt != pad).reshape(dim_x, 1, dim_y)
+        tgt_mask = tgt_mask & generate_mask(dim_y)
         return tgt_mask
-        '''
-        pass
     
 def create_train_state(
     model: nn.Module,
     learning_rate: float, 
-    key: jax.Array,
-    batch_size: int,
-    input_seq_len: int,
-    output_seq_len: int
+    key: jax.Array
 ) -> train_state.TrainState:
-    params = model.init(key, jnp.ones((1,1), dtype=int), jnp.ones((1,1), dtype=int), None, None)['params']
+    dummy_array = jnp.ones((1, 1), dtype=int)
+    dummy_mask = jnp.ones((1, 1, 1), dtype=int)
+    params = model.init(key, dummy_array, dummy_array, dummy_mask, dummy_mask)['params']
     tx = optax.adam(learning_rate)
 
     return train_state.TrainState.create(apply_fn=model.apply, params=params, tx=tx)
 
 # Train the state
-def train_step(state: train_state.TrainState, train_data: Batch) -> train_state.TrainState:
+def train_step(state: train_state.TrainState, train_data: Batch) -> tuple[float, train_state.TrainState]:
     def loss_fn(params):
         logits = state.apply_fn({'params': params}, train_data.src, train_data.tgt, train_data.src_mask, train_data.tgt_mask)
         loss = optax.softmax_cross_entropy_with_integer_labels(
@@ -104,17 +92,25 @@ def train_step(state: train_state.TrainState, train_data: Batch) -> train_state.
         ).mean()
         return loss 
     
-    grad_fn = jax.grad(loss_fn)
-    grads = grad_fn(state.params)
-    state = state.apply_gradients(grads=grads)
+    loss_grad_fn = jax.value_and_grad(loss_fn)
+    loss, grad = loss_grad_fn(state.params)
+    state = state.apply_gradients(grads=grad)
 
-    return state
+    return loss, state
 
 def train_model(state: train_state.TrainState, data_generator: callable, num_epoch: int) -> train_state.TrainState:
-    for _ in range(num_epoch):
+    for i in range(num_epoch):
+        total_loss = 0.
+        count = 0
         train_loader = data_generator()
+
         for train_batch in train_loader:
-            state = train_step(state, train_batch)
+            loss, state = train_step(state, train_batch)
+            total_loss += loss 
+            count += 1
+
+        avg_loss = total_loss / count
+        print("Epoch: {}, Loss: {}".format(i, avg_loss))
 
     return state
 
@@ -124,12 +120,26 @@ def decode(
     state: train_state.TrainState, 
     input: jnp.ndarray, # must be of size (num_test_case, input_seq_len)
     output_init: jnp.ndarray, # must be of size (num_test_case, 1)
-    output_len: int
+    output_len: int,
+    input_mask: jnp.ndarray = None
 ) -> jnp.ndarray:
+    '''
+    ys = torch.ones(1, 1).fill_(start_symbol).type_as(src.data)
+    for i in range(max_len-1):
+        out = model.decode(memory, src_mask, 
+                           Variable(ys), 
+                           Variable(subsequent_mask(ys.size(1))
+                                    .type_as(src.data)))
+        prob = model.generator(out[:, -1])
+        _, next_word = torch.max(prob, dim = 1)
+        next_word = next_word.data[0]
+        ys = torch.cat([ys, 
+                        torch.ones(1, 1).type_as(src.data).fill_(next_word)], dim=1)
+    return ys
+    '''
     curr_output = output_init
     for _ in range(output_len - 1):
-        print(curr_output)
-        logits = state.apply_fn({'params': state.params}, input, curr_output, None, None)
+        logits = state.apply_fn({'params': state.params}, input, curr_output, input_mask, generate_mask(curr_output.shape[1]))
         
         # only consider output for last sequence
         last_logits = logits[:, -1, :]
