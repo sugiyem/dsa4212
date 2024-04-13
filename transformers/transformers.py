@@ -12,10 +12,12 @@ class Attention(nn.Module):
         assert self.model_dim % self.num_attention_layer == 0, "model dimension must be divisible by number of layers"
 
         self.attention_dim = self.model_dim // self.num_attention_layer # key, query and value dimension
-        self.wq = nn.Dense(self.model_dim)
-        self.wk = nn.Dense(self.model_dim)
-        self.wv = nn.Dense(self.model_dim)
-        self.wo = nn.Dense(self.model_dim)
+
+        # Bias must all be zero, as it must represent a matrix multiplication
+        self.wq = nn.Dense(self.model_dim, bias_init=nn.initializers.zeros)
+        self.wk = nn.Dense(self.model_dim, bias_init=nn.initializers.zeros)
+        self.wv = nn.Dense(self.model_dim, bias_init=nn.initializers.zeros)
+        self.wo = nn.Dense(self.model_dim, bias_init=nn.initializers.zeros)
 
     @staticmethod
     @jax.jit
@@ -266,10 +268,11 @@ class Transformer(nn.Module):
         input_mask: jnp.ndarray = None,
         output_mask: jnp.ndarray = None
     ) -> tuple[jnp.ndarray, jnp.ndarray]:
-        # input is a jnp.ndarray of size (num_data, input_dim)
-        # output is a jnp.ndarray of size (num_data, output_dim)
+        # input is a jnp.ndarray of size (num_data, input_seq_len)
+        # output is a jnp.ndarray of size (num_data, output_seq_len)
         preprocessed_input = self.encode_preprocessor(input)
         encoding_mem = self.encoder(preprocessed_input, input_mask)
+
         preprocessed_output = self.decode_preprocessor(output)
         out = self.decoder(preprocessed_output, encoding_mem, output_mask, input_mask)
         logits = self.generator(out)
