@@ -13,11 +13,12 @@ class Attention(nn.Module):
 
         self.attention_dim = self.model_dim // self.num_attention_layer # key, query and value dimension
 
-        # Bias must all be zero, as it must represent a matrix multiplication
-        self.wq = nn.Dense(self.model_dim, bias_init=nn.initializers.zeros)
-        self.wk = nn.Dense(self.model_dim, bias_init=nn.initializers.zeros)
-        self.wv = nn.Dense(self.model_dim, bias_init=nn.initializers.zeros)
-        self.wo = nn.Dense(self.model_dim, bias_init=nn.initializers.zeros)
+        # Bias for wq, wk, wv weight must be 0, as it should represent a matrix multiplication
+        self.wq = nn.Dense(self.model_dim, kernel_init=nn.initializers.xavier_uniform(), bias_init=nn.initializers.zeros)
+        self.wk = nn.Dense(self.model_dim, kernel_init=nn.initializers.xavier_uniform(), bias_init=nn.initializers.zeros)
+        self.wv = nn.Dense(self.model_dim, kernel_init=nn.initializers.xavier_uniform(), bias_init=nn.initializers.zeros)
+
+        self.wo = nn.Dense(self.model_dim, kernel_init=nn.initializers.xavier_uniform(), bias_init=nn.initializers.uniform())
 
     @staticmethod
     @jax.jit
@@ -28,7 +29,7 @@ class Attention(nn.Module):
     ) -> jnp.ndarray:
         dk = query.shape[-1]
         scores = jnp.matmul(query, key.transpose(0,1,3,2)) / jnp.sqrt(dk)
-        return nn.softmax(scores) @ value
+        return jnp.matmul(nn.softmax(scores), value)
 
     @staticmethod 
     @jax.jit
@@ -41,7 +42,7 @@ class Attention(nn.Module):
         dk = query.shape[-1]
         scores = jnp.matmul(query, key.transpose(0,1,3,2)) / jnp.sqrt(dk)
         masked_scores = jnp.where(mask == 0, -1e9, scores)
-        return nn.softmax(masked_scores) @ value
+        return jnp.matmul(nn.softmax(masked_scores), value)
     
     def __call__(
         self,
@@ -77,8 +78,8 @@ class FeedForwardNetwork(nn.Module):
     feedforward_dim: int
 
     def setup(self):
-        self.dense1 = nn.Dense(features=self.feedforward_dim)
-        self.dense2 = nn.Dense(features=self.model_dim)
+        self.dense1 = nn.Dense(features=self.feedforward_dim, kernel_init=nn.initializers.xavier_uniform(), bias_init=nn.initializers.uniform())
+        self.dense2 = nn.Dense(features=self.model_dim, kernel_init=nn.initializers.xavier_uniform(), bias_init = nn.initializers.uniform())
 
     def __call__(self, x):
         x = self.dense1(x)
@@ -91,7 +92,7 @@ class Embedding(nn.Module):
     model_dim: int
 
     def setup(self):
-        self.embed = nn.Embed(num_embeddings=self.num_vocab, features=self.model_dim)
+        self.embed = nn.Embed(num_embeddings=self.num_vocab, features=self.model_dim, embedding_init=nn.initializers.xavier_uniform())
 
     def __call__(self, x: jnp.ndarray) -> jnp.ndarray:
         # input x is a jnp.ndarray of size (num_data, seq_len)
@@ -194,16 +195,16 @@ class SingleDecoder(nn.Module):
     def __call__(self,
         x: jnp.ndarray,
         encoding_mem: jnp.ndarray, # memory during encoding process
-        mask1: jnp.ndarray = None,
-        mask2: jnp.ndarray = None
+        src_mask: jnp.ndarray = None,
+        tgt_mask: jnp.ndarray = None
     ) -> jnp.ndarray:
         # Use the first multi-head attention
-        att_val1 = self.attention1(x, x, x, mask1)
+        att_val1 = self.attention1(x, x, x, tgt_mask)
         # Normalize
         x = self.normalizer1(x + att_val1)
 
         # Use the second multi-head attention
-        att_val2 = self.attention2(x, encoding_mem, encoding_mem, mask2)
+        att_val2 = self.attention2(x, encoding_mem, encoding_mem, src_mask)
         # Normalize
         x = self.normalizer2(x + att_val2)
 
@@ -227,18 +228,18 @@ class Decoder(nn.Module):
     def __call__(self,
         x: jnp.ndarray,
         encoding_mem: jnp.ndarray,
-        mask1: jnp.ndarray = None,
-        mask2: jnp.ndarray = None
+        src_mask: jnp.ndarray = None,
+        tgt_mask: jnp.ndarray = None
     ) -> jnp.ndarray:
         for layer in self.layers:
-            x = layer(x, encoding_mem, mask1, mask2)
+            x = layer(x, encoding_mem, src_mask, tgt_mask)
         return x
     
 class LogitsGenerator(nn.Module):
     num_vocab: int 
 
     def setup(self):
-        self.dense = nn.Dense(features=self.num_vocab)
+        self.dense = nn.Dense(features=self.num_vocab, kernel_init=nn.initializers.xavier_uniform(), bias_init=nn.initializers.uniform())
 
     def __call__(self, x: jnp.ndarray) -> jnp.ndarray:
         x = self.dense(x)
@@ -267,14 +268,14 @@ class Transformer(nn.Module):
         output: jnp.ndarray,
         input_mask: jnp.ndarray = None,
         output_mask: jnp.ndarray = None
-    ) -> tuple[jnp.ndarray, jnp.ndarray]:
+    ) -> jnp.ndarray:
         # input is a jnp.ndarray of size (num_data, input_seq_len)
         # output is a jnp.ndarray of size (num_data, output_seq_len)
         preprocessed_input = self.encode_preprocessor(input)
         encoding_mem = self.encoder(preprocessed_input, input_mask)
 
         preprocessed_output = self.decode_preprocessor(output)
-        out = self.decoder(preprocessed_output, encoding_mem, output_mask, input_mask)
+        out = self.decoder(preprocessed_output, encoding_mem, input_mask, output_mask)
         logits = self.generator(out)
         
         return logits
