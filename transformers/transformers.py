@@ -1,6 +1,7 @@
 import numpy as np
 import torch 
 import torch.nn as nn 
+from transformer_train import subsequent_mask
 
 class Attention(nn.Module):
     def __init__(self, model_dim: int, num_attention_layer: int):
@@ -260,7 +261,7 @@ class Transformer(nn.Module):
         # Initialize parameters with xavier uniform
         for param in self.parameters():
             if param.dim() > 1:
-                nn.init.xavier_uniform(param)
+                nn.init.xavier_uniform_(param)
     
     def forward(self, 
         input: torch.Tensor, 
@@ -277,3 +278,25 @@ class Transformer(nn.Module):
         logits = self.generator(out)
         
         return logits
+    
+    def greedy_decode(
+        self,
+        input: torch.Tensor, 
+        output_init: torch.Tensor,
+        output_len: int,
+        input_mask: torch.Tensor = None
+    ) -> torch.Tensor:
+        self.eval()
+        curr_output = output_init 
+
+        for _ in range(output_len - 1):
+            logits = self.forward(input, curr_output, input_mask, subsequent_mask(curr_output.shape[1]))
+
+            # only consider output for last sequence 
+            prob = logits[:, -1, :]
+            # greedy decoding: pick the vocab with largest probability 
+            _, next_vocab = torch.max(prob, dim=1)
+
+            curr_output = torch.hstack((curr_output, next_vocab.reshape(-1, 1)))
+
+        return curr_output
