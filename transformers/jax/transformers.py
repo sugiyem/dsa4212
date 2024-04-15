@@ -2,7 +2,6 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from flax import linen as nn #Linen API
-from utils import InputParams, MultiHeadAttnParams, softmax, rng_unif, relu, basic_normalize
 
 class Attention(nn.Module):
     model_dim: int 
