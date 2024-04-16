@@ -34,9 +34,9 @@ class Attention(nn.Module):
         Calculates the attention from query, key, and value.
         
         Args:
-            query (torch.Tensor): A Tensor of size (seq_len, model_dim).
-            key (torch.Tensor) : A Tensor of size (seq_len, model_dim).
-            value (torch.Tensor): A Tensor of size (seq_len, model_dim).
+            query (torch.Tensor): A Tensor of size (num_data, seq_len, model_dim).
+            key (torch.Tensor) : A Tensor of size (num_data, seq_len, model_dim).
+            value (torch.Tensor): A Tensor of size (num_data, seq_len, model_dim).
         
         Returns:
             The computed attention from query, key, and value.
@@ -56,10 +56,10 @@ class Attention(nn.Module):
         Calculates the masked attention from query, key, and value.
         
         Args:
-            query (torch.Tensor): A Tensor of size (seq_len, model_dim).
-            key (torch.Tensor) : A Tensor of size (seq_len, model_dim).
-            value (torch.Tensor): A Tensor of size (seq_len, model_dim).
-            mask (torch.Tensor): A Tensor representing the mask, of size (seq_len, seq_len).
+            query (torch.Tensor): A Tensor of size (num_data, seq_len, model_dim).
+            key (torch.Tensor) : A Tensor of size (num_data, seq_len, model_dim).
+            value (torch.Tensor): A Tensor of size (num_data, seq_len, model_dim).
+            mask (torch.Tensor): A Tensor representing the mask, of size (num_data, seq_len, seq_len).
         
         Returns:
             The computed masked attention from query, key, and value.
@@ -92,7 +92,7 @@ class Attention(nn.Module):
         if mask is not None:
             mask = mask.reshape(mask.shape[0], 1, mask.shape[1], mask.shape[2])
 
-        # All these transformed fields will be a tensor of size (num_data, num_att_ayer, len_seq, att_dim)
+        # All these transformed fields will be a tensor of size (num_data, seq_len, num_attention_layer, attention_dim)
         transformed_query = self.wq(query).reshape(num_data, -1, self.num_attention_layer, self.attention_dim).transpose(1, 2)
         transformed_key = self.wk(key).reshape(num_data, -1, self.num_attention_layer, self.attention_dim).transpose(1, 2)
         transformed_value = self.wv(value).reshape(num_data, -1, self.num_attention_layer, self.attention_dim).transpose(1, 2)
