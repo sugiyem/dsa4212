@@ -7,22 +7,25 @@ class Attention(nn.Module):
     """
     Attention class for the transformer implementation.
     """
-    def __init__(self, model_dim: int, num_attention_layer: int):
+    def __init__(self, 
+        model_dim: int, 
+        num_attention_layer: int,
+        dk: int,
+        dv: int
+    ):
         super().__init__()
 
         self.model_dim = model_dim 
         self.num_attention_layer = num_attention_layer 
-
-        assert self.model_dim % self.num_attention_layer == 0, "Model dimension must be divisible by number of layers"
-
-        self.attention_dim = self.model_dim // self.num_attention_layer # key, query and value dimension
+        self.dk = dk 
+        self.dv = dv
 
         # Bias for wq, wk, wv weight must be 0, as it should represent a matrix multiplication
-        self.wq = nn.Linear(self.model_dim, self.model_dim, bias=False)
-        self.wk = nn.Linear(self.model_dim, self.model_dim, bias=False)
-        self.wv = nn.Linear(self.model_dim, self.model_dim, bias=False)
+        self.wq = nn.Linear(model_dim, num_attention_layer * dk, bias=False)
+        self.wk = nn.Linear(model_dim, num_attention_layer * dk, bias=False)
+        self.wv = nn.Linear(model_dim, num_attention_layer * dv, bias=False)
 
-        self.wo = nn.Linear(self.model_dim, self.model_dim)
+        self.wo = nn.Linear(self.num_attention_layer * dv, self.model_dim)
 
     @staticmethod
     def calc_attention(
@@ -93,9 +96,9 @@ class Attention(nn.Module):
             mask = mask.reshape(mask.shape[0], 1, mask.shape[1], mask.shape[2])
 
         # All these transformed fields will be a tensor of size (num_data, seq_len, num_attention_layer, attention_dim)
-        transformed_query = self.wq(query).reshape(num_data, -1, self.num_attention_layer, self.attention_dim).transpose(1, 2)
-        transformed_key = self.wk(key).reshape(num_data, -1, self.num_attention_layer, self.attention_dim).transpose(1, 2)
-        transformed_value = self.wv(value).reshape(num_data, -1, self.num_attention_layer, self.attention_dim).transpose(1, 2)
+        transformed_query = self.wq(query).reshape(num_data, -1, self.num_attention_layer, self.dk).transpose(1, 2)
+        transformed_key = self.wk(key).reshape(num_data, -1, self.num_attention_layer, self.dk).transpose(1, 2)
+        transformed_value = self.wv(value).reshape(num_data, -1, self.num_attention_layer, self.dv).transpose(1, 2)
 
         if mask is None:
             attention = self.calc_attention(transformed_query, transformed_key, transformed_value)
@@ -197,10 +200,12 @@ class SingleEncoder(nn.Module):
     def __init__(self, 
         model_dim: int, 
         feedforward_dim: int, 
-        num_attention_layer: int
+        num_attention_layer: int,
+        attention_dk: int,
+        attention_dv: int
     ):
         super().__init__()
-        self.attention = Attention(model_dim, num_attention_layer)
+        self.attention = Attention(model_dim, num_attention_layer, attention_dk, attention_dv)
         self.network = FeedForwardNetwork(model_dim, feedforward_dim)
         self.normalizer1 = nn.LayerNorm(model_dim)
         self.normalizer2 = nn.LayerNorm(model_dim)
@@ -221,11 +226,13 @@ class Encoder(nn.Module):
         model_dim: int, 
         feedforward_dim: int,
         num_attention_layer: int, 
+        attention_dk: int,
+        attention_dv: int,
         num_encoder: int
     ):
         super().__init__()
-        self.layers = nn.ModuleList([SingleEncoder(model_dim, feedforward_dim, num_attention_layer) \
-                       for _ in range(num_encoder)])
+        self.layers = nn.ModuleList([SingleEncoder(model_dim, feedforward_dim, num_attention_layer, \
+                       attention_dk, attention_dv) for _ in range(num_encoder)])
         self.normalizer = nn.LayerNorm(model_dim)
         
     def forward(self, x: torch.Tensor, mask: torch.Tensor = None) -> torch.Tensor:
@@ -239,11 +246,13 @@ class SingleDecoder(nn.Module):
     def __init__(self, 
         model_dim: int, 
         feedforward_dim: int, 
-        num_attention_layer: int
+        num_attention_layer: int,
+        attention_dk: int,
+        attention_dv: int
     ):
         super().__init__()
-        self.attention1 = Attention(model_dim, num_attention_layer)
-        self.attention2 = Attention(model_dim, num_attention_layer)
+        self.attention1 = Attention(model_dim, num_attention_layer, attention_dk, attention_dv)
+        self.attention2 = Attention(model_dim, num_attention_layer, attention_dk, attention_dv)
         self.network = FeedForwardNetwork(model_dim, feedforward_dim)
         self.normalizer1 = nn.LayerNorm(model_dim)
         self.normalizer2 = nn.LayerNorm(model_dim)
@@ -275,11 +284,13 @@ class Decoder(nn.Module):
         model_dim: int, 
         feedforward_dim: int, 
         num_attention_layer: int, 
+        attention_dk: int,
+        attention_dv: int,
         num_decoder: int
     ):
         super().__init__()
-        self.layers = nn.ModuleList([SingleDecoder(model_dim, feedforward_dim, num_attention_layer) \
-                       for _ in range(num_decoder)])
+        self.layers = nn.ModuleList([SingleDecoder(model_dim, feedforward_dim, num_attention_layer, \
+                       attention_dk, attention_dv) for _ in range(num_decoder)])
         self.normalizer = nn.LayerNorm(model_dim)
         
     def forward(self, 
@@ -309,16 +320,18 @@ class Transformer(nn.Module):
         model_dim: int = 512, 
         feedforward_dim: int = 2048, 
         num_attention_layer: int = 8, 
+        attention_dk: int = 64,
+        attention_dv: int = 64,
         max_seq_len: int = 5000, 
         num_coder: int = 6
     ):
         super().__init__()
 
         self.encode_preprocessor = Preprocessing(input_vocab, model_dim, max_seq_len)
-        self.encoder = Encoder(model_dim, feedforward_dim, num_attention_layer, num_coder)
+        self.encoder = Encoder(model_dim, feedforward_dim, num_attention_layer, attention_dk, attention_dv, num_coder)
         
         self.decode_preprocessor = Preprocessing(output_vocab, model_dim, max_seq_len)
-        self.decoder = Decoder(model_dim, feedforward_dim, num_attention_layer, num_coder)
+        self.decoder = Decoder(model_dim, feedforward_dim, num_attention_layer, attention_dk, attention_dv, num_coder)
         
         self.generator = LogitsGenerator(model_dim, output_vocab)
 
