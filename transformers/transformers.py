@@ -4,6 +4,9 @@ import torch.nn as nn
 from transformer_train import subsequent_mask
 
 class Attention(nn.Module):
+    """
+    Attention class for the transformer implementation.
+    """
     def __init__(self, model_dim: int, num_attention_layer: int):
         super(Attention, self).__init__()
 
@@ -27,6 +30,17 @@ class Attention(nn.Module):
         key: torch.Tensor, 
         value: torch.Tensor
     ) -> torch.Tensor:
+        """
+        Calculates the attention from query, key, and value.
+        
+        Args:
+            query (torch.Tensor): A Tensor of size (L, d_k)
+            key (torch.Tensor) : A Tensor of size (L, d_k)
+            value (torch.Tensor): A Tensor of size (L, d_v)
+        
+        Returns:
+            The computed attention from query, key, and value.
+        """
         dk = query.shape[-1]
         scores = torch.matmul(query, key.transpose(-1,-2)) / (dk**0.5)
         return torch.matmul(nn.functional.softmax(scores, dim=-1), value)
@@ -38,12 +52,24 @@ class Attention(nn.Module):
         value: torch.Tensor, 
         mask: torch.Tensor
     ) -> torch.Tensor:
+        """
+        Calculates the masked attention from query, key, and value.
+        
+        Args:
+            query (torch.Tensor): A Tensor of size (L, d_k)
+            key (torch.Tensor) : A Tensor of size (L, d_k)
+            value (torch.Tensor): A Tensor of size (L, d_v)
+        
+        Returns:
+            The computed masked attention from query, key, and value.
+        """
         dk = query.shape[-1]
         scores = torch.matmul(query, key.transpose(-1,-2)) / (dk**0.5)
         masked_scores = torch.where(mask == 0, -1e9, scores)
         return torch.matmul(nn.functional.softmax(masked_scores, dim=-1), value)
     
-    def forward(self, 
+    def forward(
+        self, 
         query: torch.Tensor, 
         key: torch.Tensor, 
         value: torch.Tensor, 
