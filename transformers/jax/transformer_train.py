@@ -91,39 +91,30 @@ def train_step(state: train_state.TrainState, train_data: Batch) -> tuple[float,
         ).mean()
         return loss 
 
-    def accuracy_fn(params):
-        logits = state.apply_fn({'params': params}, train_data.src, train_data.tgt, train_data.src_mask, train_data.tgt_mask)
-        return (logits[:, -1, :] == train_data.tgt_final).mean()
-    
     loss_grad_fn = jax.value_and_grad(loss_fn)
     loss, grad = loss_grad_fn(state.params)
-    accuracy = accuracy_fn(state.params)
     state = state.apply_gradients(grads=grad)
 
-    return loss, state, accuracy
+    return loss, state
 
 def train_model(state: train_state.TrainState, data_generator: callable, num_epoch: int) -> train_state.TrainState:
-    loss_ls, acc_ls = [], []
+    loss_ls = []
     for i in range(num_epoch):
         total_loss = 0.
-        total_acc = 0.
         count = 0
         train_loader = data_generator()
 
         for train_batch in train_loader:
-            loss, state, accuracy = train_step(state, train_batch)
+            loss, state = train_step(state, train_batch)
             total_loss += loss 
-            total_acc += accuracy
             count += 1
 
         avg_loss = total_loss / count
-        avg_acc = total_acc / count
 
         loss_ls.append(avg_loss)
-        acc_ls.append(avg_acc)
-        print(f"Epoch: {i}, Loss: {avg_loss}, Accuracy: {avg_acc}")
+        print(f"Epoch: {i}, Loss: {avg_loss}")
 
-    return state, loss_ls, acc_ls
+    return state, loss_ls
 
 # the decode doesn't use any masking currently
 # need to fix this later
@@ -134,20 +125,6 @@ def decode(
     output_len: int,
     input_mask: jnp.ndarray = None
 ) -> jnp.ndarray:
-    '''
-    ys = torch.ones(1, 1).fill_(start_symbol).type_as(src.data)
-    for i in range(max_len-1):
-        out = model.decode(memory, src_mask, 
-                           Variable(ys), 
-                           Variable(subsequent_mask(ys.size(1))
-                                    .type_as(src.data)))
-        prob = model.generator(out[:, -1])
-        _, next_word = torch.max(prob, dim = 1)
-        next_word = next_word.data[0]
-        ys = torch.cat([ys, 
-                        torch.ones(1, 1).type_as(src.data).fill_(next_word)], dim=1)
-    return ys
-    '''
     curr_output = output_init
     for _ in range(output_len - 1):
         logits = state.apply_fn({'params': state.params}, input, curr_output, input_mask, generate_mask(curr_output.shape[1]))
