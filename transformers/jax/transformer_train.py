@@ -116,8 +116,6 @@ def train_model(state: train_state.TrainState, data_generator: callable, num_epo
 
     return state, loss_ls
 
-# the decode doesn't use any masking currently
-# need to fix this later
 def decode(
     state: train_state.TrainState, 
     input: jnp.ndarray, # must be of size (num_test_case, input_seq_len)
