@@ -1,6 +1,5 @@
 import jax
 import jax.numpy as jnp
-import flax 
 import optax
 from flax.training import train_state
 from flax import linen as nn
@@ -91,7 +90,7 @@ def train_step(state: train_state.TrainState, train_data: Batch) -> tuple[float,
             logits=logits, labels=train_data.tgt_final
         ).mean()
         return loss 
-    
+
     loss_grad_fn = jax.value_and_grad(loss_fn)
     loss, grad = loss_grad_fn(state.params)
     state = state.apply_gradients(grads=grad)
@@ -99,6 +98,7 @@ def train_step(state: train_state.TrainState, train_data: Batch) -> tuple[float,
     return loss, state
 
 def train_model(state: train_state.TrainState, data_generator: callable, num_epoch: int) -> train_state.TrainState:
+    loss_ls = []
     for i in range(num_epoch):
         total_loss = 0.
         count = 0
@@ -110,12 +110,12 @@ def train_model(state: train_state.TrainState, data_generator: callable, num_epo
             count += 1
 
         avg_loss = total_loss / count
-        print("Epoch: {}, Loss: {}".format(i, avg_loss))
 
-    return state
+        loss_ls.append(avg_loss)
+        print(f"Epoch: {i}, Loss: {avg_loss}")
 
-# the decode doesn't use any masking currently
-# need to fix this later
+    return state, loss_ls
+
 def decode(
     state: train_state.TrainState, 
     input: jnp.ndarray, # must be of size (num_test_case, input_seq_len)
@@ -123,20 +123,6 @@ def decode(
     output_len: int,
     input_mask: jnp.ndarray = None
 ) -> jnp.ndarray:
-    '''
-    ys = torch.ones(1, 1).fill_(start_symbol).type_as(src.data)
-    for i in range(max_len-1):
-        out = model.decode(memory, src_mask, 
-                           Variable(ys), 
-                           Variable(subsequent_mask(ys.size(1))
-                                    .type_as(src.data)))
-        prob = model.generator(out[:, -1])
-        _, next_word = torch.max(prob, dim = 1)
-        next_word = next_word.data[0]
-        ys = torch.cat([ys, 
-                        torch.ones(1, 1).type_as(src.data).fill_(next_word)], dim=1)
-    return ys
-    '''
     curr_output = output_init
     for _ in range(output_len - 1):
         logits = state.apply_fn({'params': state.params}, input, curr_output, input_mask, generate_mask(curr_output.shape[1]))
