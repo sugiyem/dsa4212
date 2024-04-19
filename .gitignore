@@ -163,11 +163,9 @@ cython_debug/
 .DS_Store
 
 # Data and large files
-*.csv
 *.pdf
 *.pkl
 *.xls
-*.xlsx
 *.zip
 data/
 *.pt

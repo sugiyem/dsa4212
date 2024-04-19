@@ -7,22 +7,25 @@ class Attention(nn.Module):
     """
     Attention class for the transformer implementation.
     """
-    def __init__(self, model_dim: int, num_attention_layer: int):
+    def __init__(self, 
+        model_dim: int, 
+        num_attention_layer: int,
+        dk: int,
+        dv: int
+    ):
         super().__init__()
 
         self.model_dim = model_dim 
         self.num_attention_layer = num_attention_layer 
-
-        assert self.model_dim % self.num_attention_layer == 0, "Model dimension must be divisible by number of layers"
-
-        self.attention_dim = self.model_dim // self.num_attention_layer # key, query and value dimension
+        self.dk = dk 
+        self.dv = dv
 
         # Bias for wq, wk, wv weight must be 0, as it should represent a matrix multiplication
-        self.wq = nn.Linear(self.model_dim, self.model_dim, bias=False)
-        self.wk = nn.Linear(self.model_dim, self.model_dim, bias=False)
-        self.wv = nn.Linear(self.model_dim, self.model_dim, bias=False)
+        self.wq = nn.Linear(model_dim, num_attention_layer * dk, bias=False)
+        self.wk = nn.Linear(model_dim, num_attention_layer * dk, bias=False)
+        self.wv = nn.Linear(model_dim, num_attention_layer * dv, bias=False)
 
-        self.wo = nn.Linear(self.model_dim, self.model_dim)
+        self.wo = nn.Linear(self.num_attention_layer * dv, self.model_dim)
 
     @staticmethod
     def calc_attention(
@@ -34,9 +37,9 @@ class Attention(nn.Module):
         Calculates the attention from query, key, and value.
         
         Args:
-            query (torch.Tensor): A Tensor of size (num_data, seq_len, model_dim).
-            key (torch.Tensor) : A Tensor of size (num_data, seq_len, model_dim).
-            value (torch.Tensor): A Tensor of size (num_data, seq_len, model_dim).
+            query (torch.Tensor): A Tensor of size (num_data, num_attention_layer, seq_len, dk).
+            key (torch.Tensor) : A Tensor of size (num_data, num_attention_layer, seq_len, dk).
+            value (torch.Tensor): A Tensor of size (num_data, num_attention_layer, seq_len, dv).
         
         Returns:
             The computed attention from query, key, and value.
@@ -56,10 +59,10 @@ class Attention(nn.Module):
         Calculates the masked attention from query, key, and value.
         
         Args:
-            query (torch.Tensor): A Tensor of size (num_data, seq_len, model_dim).
-            key (torch.Tensor) : A Tensor of size (num_data, seq_len, model_dim).
-            value (torch.Tensor): A Tensor of size (num_data, seq_len, model_dim).
-            mask (torch.Tensor): A Tensor representing the mask, of size (num_data, seq_len, seq_len).
+            query (torch.Tensor): A Tensor of size (num_data, num_attention_layer, seq_len, dk).
+            key (torch.Tensor) : A Tensor of size (num_data, num_attention_layer, seq_len, dk).
+            value (torch.Tensor): A Tensor of size (num_data, num_attention_layer, seq_len, dv).
+            mask (torch.Tensor): A Tensor representing the mask, of size (1, 1, 1, seq_len) or (1, 1, seq_len, seq_len).
         
         Returns:
             The computed masked attention from query, key, and value.
@@ -80,10 +83,10 @@ class Attention(nn.Module):
         Forward method of the Attention class.
 
         Args:
-            query (torch.Tensor): A Tensor of size (num_data, len_seq, dim_size).
-            key (torch.Tensor): A Tensor of size (num_data, len_seq, dim_size).
-            value (torch.Tensor): A Tensor of size (num_data, len_seq, dim_size).
-            mask (torch.Tensor): A Tensor of size (num_data, d1, d2) if not None.
+            query (torch.Tensor): A Tensor of size (num_data, seq_len, dim_size).
+            key (torch.Tensor): A Tensor of size (num_data, seq_len, dim_size).
+            value (torch.Tensor): A Tensor of size (num_data, seq_len, dim_size).
+            mask (torch.Tensor): A Tensor of size (1, 1, seq_len) or (1, seq_len, seq_len) if not None.
         """
         
         num_data = query.shape[0]
@@ -92,18 +95,18 @@ class Attention(nn.Module):
         if mask is not None:
             mask = mask.reshape(mask.shape[0], 1, mask.shape[1], mask.shape[2])
 
-        # All these transformed fields will be a tensor of size (num_data, seq_len, num_attention_layer, attention_dim)
-        transformed_query = self.wq(query).reshape(num_data, -1, self.num_attention_layer, self.attention_dim).transpose(1, 2)
-        transformed_key = self.wk(key).reshape(num_data, -1, self.num_attention_layer, self.attention_dim).transpose(1, 2)
-        transformed_value = self.wv(value).reshape(num_data, -1, self.num_attention_layer, self.attention_dim).transpose(1, 2)
+        # All these transformed fields will be a tensor of size (num_data, num_attention_layer, seq_len, attention_dim)
+        transformed_query = self.wq(query).reshape(num_data, -1, self.num_attention_layer, self.dk).transpose(1, 2)
+        transformed_key = self.wk(key).reshape(num_data, -1, self.num_attention_layer, self.dk).transpose(1, 2)
+        transformed_value = self.wv(value).reshape(num_data, -1, self.num_attention_layer, self.dv).transpose(1, 2)
 
         if mask is None:
             attention = self.calc_attention(transformed_query, transformed_key, transformed_value)
         else:
             attention = self.calc_masked_attention(transformed_query, transformed_key, transformed_value, mask)
         
-        # Transform the shape of attention to (num_data, len_seq, dim_size)
-        attention = attention.transpose(1,2).reshape(num_data, -1, self.model_dim)
+        # Transform the shape of attention to (num_data, seq_len, num_attention_layer * dv)
+        attention = attention.transpose(1,2).reshape(num_data, -1, self.num_attention_layer * self.dv)
         
         return self.wo(attention)
 
@@ -122,10 +125,10 @@ class FeedForwardNetwork(nn.Module):
         Forward method of the FeedForwardNetwork class.
 
         Args:
-            x (torch.Tensor): Input Tensor of size (num_data, model_dim).
+            x (torch.Tensor): Input Tensor of size (num_data, seq_len, model_dim).
 
         Returns:
-            An output Tensor of size (num_data, model_dim).
+            An output Tensor of size (num_data, seq_len, model_dim).
         """
         x = self.dense1(x)
         x = nn.functional.relu(x)
@@ -172,6 +175,14 @@ class PositionalEncoder(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
+        Forward method of the PositionalEncoder class.
+
+        Args:
+            x (torch.Tensor): Input Tensor of size (num_data, seq_len, model_dim).
+        
+        Returns:
+            A Tensor that has been added with a positional encoding, 
+            with a size of (num_data, seq_len, model_dim).
         """
         # input x is a tensor of size (num_data, seq_len, model_dim)
         # will output a tensor of size (num_data, seq_len, model_dim)
@@ -179,33 +190,57 @@ class PositionalEncoder(nn.Module):
         position_encoding = self.position_encoding[:seq_len, :].to(x.dtype)
         return x + position_encoding
         
-# Represents the whole pre-processing step before the real encoding steps in
-# Embeddding + Positional Encoding
 class Preprocessing(nn.Module):
+    """
+    Class representing pre-processing step before the real encoding.
+    """
     def __init__(self, num_vocab: int, model_dim: int, max_seq_len: int):
         super().__init__()
         self.embedding = Embedding(num_vocab, model_dim)
         self.positional_encoder = PositionalEncoder(model_dim, max_seq_len)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Forward method of the Preprocessing class.
+
+        Args:
+            x (torch.Tensor): Input Tensor of size (num_data, seq_len).
+
+        Returns:
+            An output Tensor of size (num_data, seq_len, model_dim).
+        """
         x = self.embedding(x)
         x = self.positional_encoder(x)
         return x
     
-# Single encoder will have one multi-head attention and one feed forward NN
 class SingleEncoder(nn.Module):
+    """
+    Class representing a single Encoder Block, with one Attention and one FeedForwardNetwork.
+    """
     def __init__(self, 
         model_dim: int, 
         feedforward_dim: int, 
-        num_attention_layer: int
+        num_attention_layer: int,
+        attention_dk: int,
+        attention_dv: int
     ):
         super().__init__()
-        self.attention = Attention(model_dim, num_attention_layer)
+        self.attention = Attention(model_dim, num_attention_layer, attention_dk, attention_dv)
         self.network = FeedForwardNetwork(model_dim, feedforward_dim)
         self.normalizer1 = nn.LayerNorm(model_dim)
         self.normalizer2 = nn.LayerNorm(model_dim)
         
     def forward(self, x: torch.Tensor, mask: torch.Tensor = None) -> torch.Tensor:
+        """
+        Forward method of the SingleEncoder class.
+
+        Args:
+            x (torch.Tensor): Input Tensor of size (num_data, seq_len, model_dim).
+            mask (torch.Tensor): A Tensor of size (1, 1, seq_len) if not None.
+
+        Returns:
+            An output Tensor of size (num_data, seq_len, model_dim).
+        """
         normed_x = self.normalizer1(x)
         att_val = self.attention(normed_x, normed_x, normed_x, mask)
         x = x + att_val 
@@ -217,33 +252,53 @@ class SingleEncoder(nn.Module):
         return x
     
 class Encoder(nn.Module):
+    """
+    Class representing multiple layers of SingleEncoder.
+    """
     def __init__(self, 
         model_dim: int, 
         feedforward_dim: int,
         num_attention_layer: int, 
+        attention_dk: int,
+        attention_dv: int,
         num_encoder: int
     ):
         super().__init__()
-        self.layers = nn.ModuleList([SingleEncoder(model_dim, feedforward_dim, num_attention_layer) \
-                       for _ in range(num_encoder)])
+        self.layers = nn.ModuleList([SingleEncoder(model_dim, feedforward_dim, num_attention_layer, \
+                       attention_dk, attention_dv) for _ in range(num_encoder)])
         self.normalizer = nn.LayerNorm(model_dim)
         
     def forward(self, x: torch.Tensor, mask: torch.Tensor = None) -> torch.Tensor:
+        """
+        Forward method of the Encoder class.
+
+        Args:
+            x (torch.Tensor): Input Tensor of size (num_data, seq_len, model_dim).
+            mask (torch.Tensor): A Tensor of size (1, 1, seq_len) if not None.
+
+        Returns:
+            A Tensor that has been passed through multiple layers of SingleEncoder and normalized,
+            with a size of (num_data, seq_len, model_dim).
+        """
         for layer in self.layers:
             x = layer(x, mask)
         x = self.normalizer(x)
         return x
 
-# Single decoder will have two multi-head attentions and one feed forward NN
 class SingleDecoder(nn.Module):
+    """
+    Class representing a single Decoder Block, with two Attentions and one FeedForwardNetwork.
+    """
     def __init__(self, 
         model_dim: int, 
         feedforward_dim: int, 
-        num_attention_layer: int
+        num_attention_layer: int,
+        attention_dk: int,
+        attention_dv: int
     ):
         super().__init__()
-        self.attention1 = Attention(model_dim, num_attention_layer)
-        self.attention2 = Attention(model_dim, num_attention_layer)
+        self.attention1 = Attention(model_dim, num_attention_layer, attention_dk, attention_dv)
+        self.attention2 = Attention(model_dim, num_attention_layer, attention_dk, attention_dv)
         self.network = FeedForwardNetwork(model_dim, feedforward_dim)
         self.normalizer1 = nn.LayerNorm(model_dim)
         self.normalizer2 = nn.LayerNorm(model_dim)
@@ -255,6 +310,18 @@ class SingleDecoder(nn.Module):
         src_mask: torch.Tensor = None, 
         tgt_mask: torch.Tensor = None
     ) -> torch.Tensor:
+        """
+        Forward method of the SingleDecoder class.
+
+        Args:
+            x (torch.Tensor): Input Tensor of size (num_data, decoding_seq_len, model_dim).
+            encoding_mem (torch.Tensor): A Tensor of size (num_data, encoding_seq_len, model_dim).
+            src_mask (torch.Tensor): A Tensor of size (1, 1, encoding_seq_len) if not None.
+            tgt_mask (torch.Tensor): A Tensor of size (1, decoding_seq_len, decoding_seq_len) if not None.
+
+        Returns:
+            An output Tensor of size (num_data, decoding_seq_len, model_dim).
+        """
         normed_x = self.normalizer1(x)
         att_val1 = self.attention1(normed_x, normed_x, normed_x, tgt_mask)
         x = x + att_val1 
@@ -271,15 +338,20 @@ class SingleDecoder(nn.Module):
         
 
 class Decoder(nn.Module):
+    """ 
+    Class representing multiple layers of SingleDecoder.
+    """
     def __init__(self, 
         model_dim: int, 
         feedforward_dim: int, 
         num_attention_layer: int, 
+        attention_dk: int,
+        attention_dv: int,
         num_decoder: int
     ):
         super().__init__()
-        self.layers = nn.ModuleList([SingleDecoder(model_dim, feedforward_dim, num_attention_layer) \
-                       for _ in range(num_decoder)])
+        self.layers = nn.ModuleList([SingleDecoder(model_dim, feedforward_dim, num_attention_layer, \
+                       attention_dk, attention_dv) for _ in range(num_decoder)])
         self.normalizer = nn.LayerNorm(model_dim)
         
     def forward(self, 
@@ -288,37 +360,67 @@ class Decoder(nn.Module):
         src_mask: torch.Tensor = None, 
         tgt_mask: torch.Tensor = None
     ) -> torch.Tensor:
+        """
+        Forward method of SingleDecoder class.
+
+        Args:
+            x (torch.Tensor): Input Tensor of size (num_data, decoding_seq_len, model_dim).
+            encoding_mem (torch.Tensor): A Tensor of size (num_data, encoding_seq_len, model_dim).
+            src_mask (torch.Tensor): A Tensor of size (1, 1, encoding_seq_len) if not None.
+            tgt_mask (torch.Tensor): A Tensor of size (1, decoding_seq_len, decoding_seq_len) if not None.
+
+        Returns:
+            A Tensor that has been passed through multiple layers of SingleDecoder and normalized,
+            with a size of (num_data, decoding_seq_len, model_dim).
+        """
         for layer in self.layers:
             x = layer(x, encoding_mem, src_mask, tgt_mask)
         x = self.normalizer(x)
         return x
     
 class LogitsGenerator(nn.Module):
+    """
+    Simple Neural Network with with LogSoftmax as it's activation function.
+    """
     def __init__(self, model_dim: int, num_vocab: int):
         super().__init__()
         self.dense = nn.Linear(model_dim, num_vocab)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Forward method of the LogitsGenerator class.
+
+        Args:
+            x (torch.Tensor): Input Tensor of size (num_data, seq_len, model_dim).
+
+        Returns:
+            An output Tensor of size (num_data, seq_len, num_vocab)
+        """
         x = self.dense(x)
         return nn.functional.log_softmax(x, dim=-1)
     
 class Transformer(nn.Module):
+    """ 
+    Class representing Transformer, as specified in https://arxiv.org/abs/1706.03762.
+    """
     def __init__(self, 
         input_vocab: int, 
         output_vocab: int, 
         model_dim: int = 512, 
         feedforward_dim: int = 2048, 
         num_attention_layer: int = 8, 
+        attention_dk: int = 64,
+        attention_dv: int = 64,
         max_seq_len: int = 5000, 
         num_coder: int = 6
     ):
         super().__init__()
 
         self.encode_preprocessor = Preprocessing(input_vocab, model_dim, max_seq_len)
-        self.encoder = Encoder(model_dim, feedforward_dim, num_attention_layer, num_coder)
+        self.encoder = Encoder(model_dim, feedforward_dim, num_attention_layer, attention_dk, attention_dv, num_coder)
         
         self.decode_preprocessor = Preprocessing(output_vocab, model_dim, max_seq_len)
-        self.decoder = Decoder(model_dim, feedforward_dim, num_attention_layer, num_coder)
+        self.decoder = Decoder(model_dim, feedforward_dim, num_attention_layer, attention_dk, attention_dv, num_coder)
         
         self.generator = LogitsGenerator(model_dim, output_vocab)
 
@@ -328,16 +430,28 @@ class Transformer(nn.Module):
                 nn.init.xavier_uniform_(param)
     
     def forward(self, 
-        input: torch.Tensor, 
-        output: torch.Tensor, 
-        input_mask: torch.Tensor = None, 
-        output_mask: torch.Tensor = None
+        src_input: torch.Tensor, 
+        tgt_input: torch.Tensor, 
+        src_mask: torch.Tensor = None, 
+        tgt_mask: torch.Tensor = None
     ) -> torch.Tensor:
-        preprocessed_input = self.encode_preprocessor(input)
-        encoding_mem = self.encoder(preprocessed_input, input_mask)
+        """
+        Forward method of the Transformer class.
 
-        preprocessed_output = self.decode_preprocessor(output)
-        out = self.decoder(preprocessed_output, encoding_mem, input_mask, output_mask)
+        Args:
+            src_input (torch.Tensor): Input Tensor of size (num_data, encoding_seq_len).
+            tgt_input (torch.Tensor): Input Tensor of size (num_data, decoding_seq_len).
+            src_mask (torch.Tensor): A Tensor of size (1, 1, encoding_seq_len) if not None.
+            tgt_mask (torch.Tensor): A Tensor of size (1, decoding_seq_len, decoding_seq_len) if not None.
+
+        Returns:
+            An output Tensor of size (num_data, decoding_seq_len, output_vocab).
+        """
+        preprocessed_src_input = self.encode_preprocessor(src_input)
+        encoding_mem = self.encoder(preprocessed_src_input, src_mask)
+
+        preprocessed_tgt_input = self.decode_preprocessor(tgt_input)
+        out = self.decoder(preprocessed_tgt_input, encoding_mem, src_mask, tgt_mask)
 
         logits = self.generator(out)
         
@@ -345,22 +459,34 @@ class Transformer(nn.Module):
     
     def greedy_decode(
         self,
-        input: torch.Tensor, 
-        output_init: torch.Tensor,
-        output_len: int,
-        input_mask: torch.Tensor = None
+        src: torch.Tensor, 
+        tgt_init: torch.Tensor,
+        tgt_len: int,
+        src_mask: torch.Tensor = None
     ) -> torch.Tensor:
-        self.eval()
-        curr_output = output_init 
+        """
+        Greedily find the best output given the input `src` and initial vocab for output `tgt_init`.
 
-        for _ in range(output_len - 1):
-            logits = self.forward(input, curr_output, input_mask, subsequent_mask(curr_output.shape[1]))
+        Args:
+            src (torch.Tensor): Input Tensor of size (num_data, encoding_seq_len).
+            tgt_init (torch.Tensor): Input Tensor of size (num_data, 1).
+            src_mask (torch.Tensor): A Tensor of size (1, 1, encoding_seq_len) if not None.
+            tgt_len (int): Length of the output.
+
+        Returns:
+            An output Tensor of size (num_data, tgt_len).
+        """
+        self.eval()
+        curr_tgt = tgt_init
+
+        for _ in range(tgt_len - 1):
+            logits = self.forward(src, curr_tgt, src_mask, subsequent_mask(curr_tgt.shape[1]))
 
             # only consider output for last sequence 
             prob = logits[:, -1, :]
             # greedy decoding: pick the vocab with largest probability 
             _, next_vocab = torch.max(prob, dim=1)
 
-            curr_output = torch.hstack((curr_output, next_vocab.reshape(-1, 1)))
+            curr_tgt = torch.hstack((curr_tgt, next_vocab.reshape(-1, 1)))
 
-        return curr_output
+        return curr_tgt
